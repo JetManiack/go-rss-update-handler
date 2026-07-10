@@ -1,0 +1,16 @@
+# Example configuration for go-rss-update-handler.
+# Secrets are supplied via environment variables:
+#   GRUH_DB_DSN        — database connection string (storage.dsn)
+#   GRUH_LLM_API_KEY   — LLM API key (llm.api_key)
+
+storage:
+  driver: postgres
+
+llm:
+  base_url: https://vllm.internal:8000/v1
+  model: qwen3-32b
+
+observability:
+  log:
+    level: info
+    format: json

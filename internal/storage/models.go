@@ -1,0 +1,80 @@
+package storage
+
+import (
+	"time"
+)
+
+// Feed represents a feed to be updated.
+type Feed struct {
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	URL          string    `gorm:"uniqueIndex;not null;type:text"`
+	Etag         string    `gorm:"type:text"`
+	LastModified string    `gorm:"type:text"`
+	Active       bool      `gorm:"not null;default:true"`
+	CreatedAt    time.Time `gorm:"not null"`
+	Channels     []Channel `gorm:"many2many:feed_channels;joinForeignKey:FeedID;joinReferences:ChannelID"`
+}
+
+// TableName overrides the default table name for Feed.
+func (Feed) TableName() string {
+	return "feeds"
+}
+
+// Update represents a parsed update from a feed.
+type Update struct {
+	ID                int64       `gorm:"primaryKey;autoIncrement"`
+	FeedID            int64       `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
+	Fingerprint       string      `gorm:"uniqueIndex;not null;type:text"`
+	SourceURL         string      `gorm:"type:text"`
+	PublishedAt       time.Time   `gorm:"not null;index:idx_updates_feed_important_published,priority:3"`
+	CreatedAt         time.Time   `gorm:"not null"`
+	VerdictImportant  *bool       `gorm:"index:idx_updates_feed_important_published,priority:2"` // Nullable
+	VerdictCategory   string      `gorm:"type:text"`
+	VerdictConfidence float64     `gorm:"type:real"`
+	VerdictReason     string      `gorm:"type:text"`
+	ClassifiedAt      *time.Time  // Nullable
+	RawContent        *RawContent `gorm:"foreignKey:UpdateID;constraint:OnDelete:CASCADE"`
+}
+
+// TableName overrides the default table name for Update.
+func (Update) TableName() string {
+	return "updates"
+}
+
+// RawContent represents the raw, unparsed content of an update.
+type RawContent struct {
+	UpdateID  int64     `gorm:"primaryKey;autoIncrement:false"`
+	Content   string    `gorm:"type:text;not null"`
+	CreatedAt time.Time `gorm:"not null"`
+}
+
+// TableName overrides the default table name for RawContent.
+func (RawContent) TableName() string {
+	return "raw_contents"
+}
+
+// Channel represents a notification channel (e.g. Telegram, Slack, Webhook).
+type Channel struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement"`
+	Name       string    `gorm:"uniqueIndex;not null;type:text"`
+	Type       string    `gorm:"type:text;not null"`
+	ConfigJSON string    `gorm:"type:text;not null"`
+	Feeds      []Feed    `gorm:"many2many:feed_channels;joinForeignKey:ChannelID;joinReferences:FeedID"`
+}
+
+// TableName overrides the default table name for Channel.
+func (Channel) TableName() string {
+	return "channels"
+}
+
+// Dispatch represents the delivery status of an update to a channel.
+type Dispatch struct {
+	UpdateID    int64     `gorm:"primaryKey;autoIncrement:false"`
+	ChannelID   int64     `gorm:"primaryKey;autoIncrement:false"`
+	DeliveredAt time.Time `gorm:"not null"`
+}
+
+// TableName overrides the default table name for Dispatch.
+func (Dispatch) TableName() string {
+	return "dispatches"
+}
