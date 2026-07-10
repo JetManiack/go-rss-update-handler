@@ -31,6 +31,10 @@ var envKeyMap = map[string]string{
 	"GRUH_LLM_BASE_URL":   "llm.base_url",
 	"GRUH_LLM_MODEL":      "llm.model",
 	"GRUH_LLM_API_KEY":    "llm.api_key",
+	"GRUH_LLM_TIMEOUT":    "llm.timeout",
+	"GRUH_LLM_RETRIES":    "llm.max_retries",
+	"GRUH_LLM_CONCURRENT": "llm.max_concurrent",
+	"GRUH_LLM_TEMP":       "llm.temperature",
 	"GRUH_LOG_LEVEL":      "observability.log.level",
 	"GRUH_LOG_FORMAT":     "observability.log.format",
 }
@@ -49,6 +53,10 @@ func Load(path string) (*Config, error) {
 	defaults := map[string]any{
 		"observability.log.level":  "info",
 		"observability.log.format": "json",
+		"llm.timeout":              "60s",
+		"llm.max_retries":          3,
+		"llm.max_concurrent":       4,
+		"llm.temperature":          0.1,
 	}
 	for key, val := range defaults {
 		if err := k.Set(key, val); err != nil {

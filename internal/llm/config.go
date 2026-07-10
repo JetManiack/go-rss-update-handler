@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 )
 
 // Config holds settings for the LLM HTTP client.
 type Config struct {
-	BaseURL string `koanf:"base_url"`
-	Model   string `koanf:"model"`
-	APIKey  string `koanf:"api_key"` // secret, populated from env GRUH_LLM_API_KEY
+	BaseURL       string        `koanf:"base_url"`
+	Model         string        `koanf:"model"`
+	APIKey        string        `koanf:"api_key"` // secret, populated from env GRUH_LLM_API_KEY
+	Timeout       time.Duration `koanf:"timeout"`
+	MaxRetries    int           `koanf:"max_retries"`
+	MaxConcurrent int           `koanf:"max_concurrent"`
+	Temperature   float64       `koanf:"temperature"`
 }
 
 // Validate checks that BaseURL is a valid absolute http/https URL and that
@@ -30,6 +35,19 @@ func (c Config) Validate() error {
 
 	if c.Model == "" {
 		errs = append(errs, fmt.Errorf("llm: model must not be empty"))
+	}
+
+	if c.Timeout <= 0 {
+		errs = append(errs, fmt.Errorf("llm: timeout must be positive"))
+	}
+	if c.MaxRetries < 0 {
+		errs = append(errs, fmt.Errorf("llm: max_retries must be non-negative"))
+	}
+	if c.MaxConcurrent <= 0 {
+		errs = append(errs, fmt.Errorf("llm: max_concurrent must be positive"))
+	}
+	if c.Temperature < 0 || c.Temperature > 2 {
+		errs = append(errs, fmt.Errorf("llm: temperature must be between 0 and 2"))
 	}
 
 	return errors.Join(errs...)
