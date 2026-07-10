@@ -29,7 +29,13 @@ func TestOrchestrator(t *testing.T) {
 	defer server.Close()
 	
 	b := bus.NewMemoryBus()
-	c := collector.NewCollector(time.Second)
+	c := collector.NewCollector(collector.Config{
+		Timeout:     time.Second,
+		RatePerHost: 10,
+		Retries:     1,
+		BackoffBase: time.Millisecond,
+		UserAgent:   "test",
+	})
 	p := parser.NewParser()
 	d := deduplicator.NewDeduplicator()
 	o := NewOrchestrator(c, p, d, b)

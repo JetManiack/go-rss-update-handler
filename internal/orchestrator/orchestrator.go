@@ -21,17 +21,15 @@ func NewOrchestrator(c *collector.Collector, p *parser.Parser, d *deduplicator.D
 }
 
 func (o *Orchestrator) ProcessFeed(ctx context.Context, feedURL string) error {
-	// В реальной жизни нужно хранить состояние ETag/LastModified в БД, 
-	// здесь для упрощения — пусто.
-	body, _, _, err := o.collector.Fetch(ctx, feedURL, "", "")
+	res, err := o.collector.Fetch(ctx, collector.FeedRef{URL: feedURL})
 	if err != nil {
 		return err
 	}
-	if body == nil {
-		return nil // 304
+	if res.NotModified {
+		return nil
 	}
 
-	events, err := o.parser.Parse(ctx, feedURL, body)
+	events, err := o.parser.Parse(ctx, feedURL, res.Body)
 	if err != nil {
 		return err
 	}

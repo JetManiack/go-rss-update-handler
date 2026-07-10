@@ -21,26 +21,32 @@ func TestCollector_Fetch(t *testing.T) {
 	}))
 	defer server.Close()
 	
-	col := NewCollector(time.Second)
+	col := NewCollector(Config{
+		Timeout:     time.Second,
+		RatePerHost: 10,
+		Retries:     1,
+		BackoffBase: time.Millisecond,
+		UserAgent:   "test",
+	})
 	
 	// Test normal fetch
-	body, etag, _, err := col.Fetch(context.Background(), server.URL, "", "")
+	res, err := col.Fetch(context.Background(), FeedRef{URL: server.URL})
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
 	}
-	if string(body) != "hello" {
-		t.Errorf("Expected hello, got %s", body)
+	if string(res.Body) != "hello" {
+		t.Errorf("Expected hello, got %s", res.Body)
 	}
-	if etag != "etag2" {
-		t.Errorf("Expected etag2, got %s", etag)
+	if res.ETag != "etag2" {
+		t.Errorf("Expected etag2, got %s", res.ETag)
 	}
 	
 	// Test NotModified
-	body, etag, _, err = col.Fetch(context.Background(), server.URL, "etag1", "")
+	res, err = col.Fetch(context.Background(), FeedRef{URL: server.URL, ETag: "etag1"})
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
 	}
-	if body != nil {
-		t.Errorf("Expected nil body for 304, got %s", body)
+	if res.Body != nil {
+		t.Errorf("Expected nil body for 304, got %s", res.Body)
 	}
 }
