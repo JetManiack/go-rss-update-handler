@@ -21,13 +21,13 @@ func (m *mockPrompts) Render(name string, data any) (string, error) {
 
 type stubRepo struct{}
 func (r *stubRepo) InsertNew(ctx context.Context, updates []storage.Update) ([]storage.Update, error) { return nil, nil }
-func (r *stubRepo) SaveVerdict(ctx context.Context, updateID int64, v storage.Verdict) error { return nil }
-func (r *stubRepo) LastImportant(ctx context.Context, feedID int64, n int) ([]storage.Update, error) { return nil, nil }
-func (r *stubRepo) MarkDispatched(ctx context.Context, updateID int64, channel string) error { return nil }
+func (r *stubRepo) SaveVerdict(ctx context.Context, updateID string, v storage.Verdict) error { return nil }
+func (r *stubRepo) LastImportant(ctx context.Context, feedID string, n int) ([]storage.Update, error) { return nil, nil }
+func (r *stubRepo) MarkDispatched(ctx context.Context, updateID string, channel string) error { return nil }
 
 func TestClassify(t *testing.T) {
 	svc := New(&mockLLM{}, &mockPrompts{}, &stubRepo{})
-	verdict, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: 1})
+	verdict, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: "1"})
 	if err != nil {
 		t.Fatalf("Classify failed: %v", err)
 	}

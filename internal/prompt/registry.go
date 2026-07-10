@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 )
 
@@ -155,24 +155,12 @@ func (r *registry) Render(name string, data any) (string, error) {
 }
 
 func (r *registry) watch() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return
-	}
-	defer watcher.Close()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-	if err := watcher.Add(r.userDir); err != nil {
-		return
-	}
-
-	for {
-		select {
-		case event := <-watcher.Events:
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				r.reload()
-			}
-		case err := <-watcher.Errors:
-			fmt.Printf("watcher error: %v\n", err)
+	for range ticker.C {
+		if err := r.reload(); err != nil {
+			fmt.Printf("reload error: %v\n", err)
 		}
 	}
 }

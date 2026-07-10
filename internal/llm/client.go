@@ -85,9 +85,16 @@ func (c *client) Complete(ctx context.Context, req Request) (Response, error) {
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 
-	// TODO: implement retries with backoff here.
+	// Re-create request for each attempt to avoid re-reading a consumed body
 	var resp *http.Response
 	for i := 0; i <= c.cfg.MaxRetries; i++ {
+		httpReq, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+		if err != nil {
+			return Response{}, fmt.Errorf("llm: create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
 		resp, err = c.httpClient.Do(httpReq)
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {

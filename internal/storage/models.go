@@ -6,7 +6,7 @@ import (
 
 // Feed represents a feed to be updated.
 type Feed struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	ID           string    `gorm:"primaryKey;type:varchar(36)"`
 	URL          string    `gorm:"uniqueIndex;not null;type:text"`
 	Etag         string    `gorm:"type:text"`
 	LastModified string    `gorm:"type:text"`
@@ -22,8 +22,8 @@ func (Feed) TableName() string {
 
 // Update represents a parsed update from a feed.
 type Update struct {
-	ID                int64       `gorm:"primaryKey;autoIncrement"`
-	FeedID            int64       `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
+	ID                string      `gorm:"primaryKey;type:varchar(36)"`
+	FeedID            string      `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
 	Fingerprint       string      `gorm:"uniqueIndex;not null;type:text"`
 	SourceURL         string      `gorm:"type:text"`
 	PublishedAt       time.Time   `gorm:"not null;index:idx_updates_feed_important_published,priority:3"`
@@ -43,7 +43,7 @@ func (Update) TableName() string {
 
 // RawContent represents the raw, unparsed content of an update.
 type RawContent struct {
-	UpdateID  int64     `gorm:"primaryKey;autoIncrement:false"`
+	UpdateID  string    `gorm:"primaryKey;type:varchar(36)"`
 	Content   string    `gorm:"type:text;not null"`
 	CreatedAt time.Time `gorm:"not null"`
 }
@@ -55,7 +55,7 @@ func (RawContent) TableName() string {
 
 // Channel represents a notification channel (e.g. Telegram, Slack, Webhook).
 type Channel struct {
-	ID         int64     `gorm:"primaryKey;autoIncrement"`
+	ID         string    `gorm:"primaryKey;type:varchar(36)"`
 	Name       string    `gorm:"uniqueIndex;not null;type:text"`
 	Type       string    `gorm:"type:text;not null"`
 	ConfigJSON string    `gorm:"type:text;not null"`
@@ -69,8 +69,8 @@ func (Channel) TableName() string {
 
 // Dispatch represents the delivery status of an update to a channel.
 type Dispatch struct {
-	UpdateID    int64     `gorm:"primaryKey;autoIncrement:false"`
-	ChannelID   int64     `gorm:"primaryKey;autoIncrement:false"`
+	UpdateID    string    `gorm:"primaryKey;type:varchar(36)"`
+	ChannelID   string    `gorm:"primaryKey;type:varchar(36)"`
 	DeliveredAt time.Time `gorm:"not null"`
 }
 

@@ -4,7 +4,7 @@ import "time"
 
 // UpdateEvent — ядро модели данных системы.
 type UpdateEvent struct {
-	FeedID      int64
+	FeedID      string
 	SourceURL   string    // URL записи (link) либо URL фида
 	RawContent  string    // нормализованный контент записи
 	PublishedAt time.Time // UTC

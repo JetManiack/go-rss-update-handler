@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -26,16 +27,16 @@ type Store interface {
 // FeedRepo defines operations on feeds.
 type FeedRepo interface {
 	List(ctx context.Context) ([]Feed, error)
-	UpdateCacheHeaders(ctx context.Context, feedID int64, etag, lastModified string) error
-	ChannelsFor(ctx context.Context, feedID int64) ([]string, error)
+	UpdateCacheHeaders(ctx context.Context, feedID string, etag, lastModified string) error
+	ChannelsFor(ctx context.Context, feedID string) ([]string, error)
 }
 
 // UpdateRepo defines operations on updates.
 type UpdateRepo interface {
 	InsertNew(ctx context.Context, updates []Update) ([]Update, error)
-	SaveVerdict(ctx context.Context, updateID int64, v Verdict) error
-	LastImportant(ctx context.Context, feedID int64, n int) ([]Update, error)
-	MarkDispatched(ctx context.Context, updateID int64, channel string) error
+	SaveVerdict(ctx context.Context, updateID string, v Verdict) error
+	LastImportant(ctx context.Context, feedID string, n int) ([]Update, error)
+	MarkDispatched(ctx context.Context, updateID string, channel string) error
 }
 
 // ChannelRepo defines operations on channels.
@@ -76,14 +77,14 @@ func (r *feedRepo) List(ctx context.Context) ([]Feed, error) {
 	return feeds, err
 }
 
-func (r *feedRepo) UpdateCacheHeaders(ctx context.Context, feedID int64, etag, lastModified string) error {
+func (r *feedRepo) UpdateCacheHeaders(ctx context.Context, feedID string, etag, lastModified string) error {
 	return r.db.WithContext(ctx).Model(&Feed{}).Where("id = ?", feedID).Updates(map[string]any{
 		"etag":          etag,
 		"last_modified": lastModified,
 	}).Error
 }
 
-func (r *feedRepo) ChannelsFor(ctx context.Context, feedID int64) ([]string, error) {
+func (r *feedRepo) ChannelsFor(ctx context.Context, feedID string) ([]string, error) {
 	var names []string
 	err := r.db.WithContext(ctx).Table("channels").
 		Joins("join feed_channels on channels.id = feed_channels.channel_id").
@@ -99,23 +100,26 @@ type updateRepo struct {
 func (r *updateRepo) InsertNew(ctx context.Context, updates []Update) ([]Update, error) {
 	var inserted []Update
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, u := range updates {
+		for i := range updates {
+			if updates[i].ID == "" {
+				updates[i].ID = uuid.NewString()
+			}
 			// Try to insert update using OnConflict DoNothing
 			res := tx.Omit("RawContent").Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "fingerprint"}},
 				DoNothing: true,
-			}).Create(&u)
+			}).Create(&updates[i])
 			if res.Error != nil {
 				return res.Error
 			}
 			if res.RowsAffected > 0 {
-				if u.RawContent != nil {
-					u.RawContent.UpdateID = u.ID
-					if err := tx.Create(u.RawContent).Error; err != nil {
+				if updates[i].RawContent != nil {
+					updates[i].RawContent.UpdateID = updates[i].ID
+					if err := tx.Create(updates[i].RawContent).Error; err != nil {
 						return err
 					}
 				}
-				inserted = append(inserted, u)
+				inserted = append(inserted, updates[i])
 			}
 		}
 		return nil
@@ -130,7 +134,7 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
-func (r *updateRepo) SaveVerdict(ctx context.Context, updateID int64, v Verdict) error {
+func (r *updateRepo) SaveVerdict(ctx context.Context, updateID string, v Verdict) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).Model(&Update{}).Where("id = ?", updateID).Updates(map[string]any{
 		"verdict_important":  boolPtr(v.Important),
@@ -141,7 +145,7 @@ func (r *updateRepo) SaveVerdict(ctx context.Context, updateID int64, v Verdict)
 	}).Error
 }
 
-func (r *updateRepo) LastImportant(ctx context.Context, feedID int64, n int) ([]Update, error) {
+func (r *updateRepo) LastImportant(ctx context.Context, feedID string, n int) ([]Update, error) {
 	var updates []Update
 	err := r.db.WithContext(ctx).
 		Where("feed_id = ? AND verdict_important = ?", feedID, true).
@@ -151,7 +155,7 @@ func (r *updateRepo) LastImportant(ctx context.Context, feedID int64, n int) ([]
 	return updates, err
 }
 
-func (r *updateRepo) MarkDispatched(ctx context.Context, updateID int64, channelName string) error {
+func (r *updateRepo) MarkDispatched(ctx context.Context, updateID string, channelName string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ch Channel
 		if err := tx.Where("name = ?", channelName).First(&ch).Error; err != nil {
@@ -173,6 +177,9 @@ type channelRepo struct {
 }
 
 func (r *channelRepo) Create(ctx context.Context, ch *Channel) error {
+	if ch.ID == "" {
+		ch.ID = uuid.NewString()
+	}
 	return r.db.WithContext(ctx).Create(ch).Error
 }
 

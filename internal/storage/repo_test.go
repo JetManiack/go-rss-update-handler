@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
@@ -28,6 +29,7 @@ func TestStorage_Flow(t *testing.T) {
 
 	// 1. Setup Feeds and Channels
 	feed1 := storage.Feed{
+		ID:        uuid.NewString(),
 		URL:       "https://example.com/feed1",
 		Active:    true,
 		CreatedAt: time.Now(),
@@ -37,6 +39,7 @@ func TestStorage_Flow(t *testing.T) {
 	}
 
 	channel1 := storage.Channel{
+		ID:         uuid.NewString(),
 		Name:       "telegram_chan",
 		Type:       "telegram",
 		ConfigJSON: `{"chat_id": "123"}`,
@@ -65,7 +68,7 @@ func TestStorage_Flow(t *testing.T) {
 		t.Fatalf("UpdateCacheHeaders failed: %v", err)
 	}
 	var updatedFeed storage.Feed
-	if err := db.First(&updatedFeed, feed1.ID).Error; err != nil {
+	if err := db.First(&updatedFeed, "id = ?", feed1.ID).Error; err != nil {
 		t.Fatalf("Failed to fetch updated feed: %v", err)
 	}
 	if updatedFeed.Etag != "etag123" || updatedFeed.LastModified != "Mon, 01 Jan 2026 00:00:00 GMT" {
@@ -194,7 +197,7 @@ func TestStorage_Flow(t *testing.T) {
 		t.Errorf("LastImportant returned %d items, want 1", len(important))
 	} else {
 		if important[0].ID != inserted[0].ID {
-			t.Errorf("LastImportant returned update ID %d, want %d", important[0].ID, inserted[0].ID)
+			t.Errorf("LastImportant returned update ID %s, want %s", important[0].ID, inserted[0].ID)
 		}
 		if important[0].VerdictImportant == nil || !*important[0].VerdictImportant {
 			t.Errorf("VerdictImportant is not true: %v", important[0].VerdictImportant)
