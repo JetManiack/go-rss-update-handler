@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"go-rss-update-handler/internal/storage"
+	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
 func TestStorage_Flow(t *testing.T) {

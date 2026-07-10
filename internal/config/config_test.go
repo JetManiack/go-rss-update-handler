@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go-rss-update-handler/internal/config"
+	"github.com/jetbrains/go-rss-update-handler/internal/config"
 )
 
 // validEnv sets all required secret env vars so that Validate() passes in tests

@@ -1,7 +1,7 @@
 BINARY_NAME := gruh
 BIN_DIR     := bin
 CMD_DIR     := ./cmd/gruh
-GOLANGCI_LINT_VERSION := v1.61.0
+GOLANGCI_LINT_VERSION := latest
 STATICCHECK_VERSION   := latest
 GOSEC_VERSION         := latest
 GOVULNCHECK_VERSION   := latest

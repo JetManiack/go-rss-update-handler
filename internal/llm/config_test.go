@@ -3,7 +3,7 @@ package llm_test
 import (
 	"testing"
 
-	"go-rss-update-handler/internal/llm"
+	"github.com/jetbrains/go-rss-update-handler/internal/llm"
 )
 
 func TestConfig_Validate(t *testing.T) {

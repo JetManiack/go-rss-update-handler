@@ -3,7 +3,7 @@ package observability_test
 import (
 	"testing"
 
-	"go-rss-update-handler/internal/observability"
+	"github.com/jetbrains/go-rss-update-handler/internal/observability"
 )
 
 func TestConfig_Validate(t *testing.T) {

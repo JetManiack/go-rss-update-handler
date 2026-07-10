@@ -12,9 +12,9 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 
-	"go-rss-update-handler/internal/llm"
-	"go-rss-update-handler/internal/observability"
-	"go-rss-update-handler/internal/storage"
+	"github.com/jetbrains/go-rss-update-handler/internal/llm"
+	"github.com/jetbrains/go-rss-update-handler/internal/observability"
+	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
 // Config is the root application configuration.
