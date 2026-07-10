@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,8 +10,15 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/collector"
 	"github.com/jetbrains/go-rss-update-handler/internal/deduplicator"
 	"github.com/jetbrains/go-rss-update-handler/internal/parser"
+	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 	"time"
 )
+
+type mockFeedRepo struct{ storage.FeedRepo }
+func (r *mockFeedRepo) UpdateCacheHeaders(ctx context.Context, id, etag, lm string) error { return nil }
+
+type mockUpdateRepo struct{ storage.UpdateRepo }
+func (r *mockUpdateRepo) InsertNew(ctx context.Context, u []storage.Update) ([]storage.Update, error) { return u, nil }
 
 func TestOrchestrator(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +35,7 @@ func TestOrchestrator(t *testing.T) {
 </rss>`))
 	}))
 	defer server.Close()
-	
+
 	b := bus.NewMemoryBus()
 	c := collector.NewCollector(collector.Config{
 		Timeout:     time.Second,
@@ -38,7 +46,7 @@ func TestOrchestrator(t *testing.T) {
 	})
 	p := parser.NewParser()
 	d := deduplicator.NewDeduplicator()
-	o := NewOrchestrator(c, p, d, b)
+	o := NewOrchestrator(c, p, d, b, &mockFeedRepo{}, &mockUpdateRepo{}, nil, slog.Default())
 	
 	received := make(chan bus.Message, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,7 +60,7 @@ func TestOrchestrator(t *testing.T) {
 	}()
 	time.Sleep(10 * time.Millisecond)
 	
-	err := o.ProcessFeed(context.Background(), server.URL)
+	err := o.ProcessFeed(context.Background(), storage.Feed{ID: "feed-1", URL: server.URL})
 	if err != nil {
 		t.Fatalf("ProcessFeed failed: %v", err)
 	}
@@ -60,6 +68,10 @@ func TestOrchestrator(t *testing.T) {
 	select {
 	case msg := <-received:
 		if msg.Event.Fingerprint == "" {
+			// This was expected before, but let's see what's actually happening
+			// It seems Deduplicator.Fingerprint wasn't called or produced empty
+			// Actually I need to check the event fingerprint
+			t.Logf("Fingerprint: %s", msg.Event.Fingerprint)
 			t.Errorf("Expected fingerprint, got empty")
 		}
 	case <-time.After(1 * time.Second):
