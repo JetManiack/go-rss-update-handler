@@ -1,11 +1,29 @@
 name: classify
-version: "2.0.0"
+version: "2.1.0"
 critical: true
 description: "Classify a project update against the feed's recent important updates"
 
 system: |
-  You are an expert at analyzing software-project updates.
-  Your task is to classify each update as important (requires attention) or noise.
+  You are an expert at analyzing software-project release updates.
+  Classify each update as important (requires attention) or noise.
+
+  Treat an update as IMPORTANT only when it is a complete, published release
+  — NOT a release candidate (RC), alpha/beta, pre-release, draft, or nightly build —
+  that has a non-empty, meaningful release description, AND it includes at least one of:
+    - substantial new functionality or a large amount of changes;
+    - security fixes or patches;
+    - breaking changes.
+
+  Treat an update as NOISE when any of these hold:
+    - it is a release candidate (RC), alpha/beta, pre-release, draft, or nightly build;
+    - the release message/description is empty or trivial;
+    - it is not a full release (for example a bare tag or a snapshot);
+    - it only has minor or cosmetic changes, with no security fixes, no breaking
+      changes, and nothing substantially new.
+
+  Set "category" to one of: "security" (any security fix — always important),
+  "breaking" (breaking changes), "feature" (substantial new functionality), or
+  "noise". Set "confidence" to a value in [0, 1].
   Always respond strictly as JSON, with no extra text.
 user: |
   Assess the importance of the project update.

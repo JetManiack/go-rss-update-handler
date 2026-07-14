@@ -63,7 +63,7 @@ Each blueprint is a YAML document:
 
 ```yaml
 name: classify
-version: "2.0.0"
+version: "2.1.0"
 critical: true
 description: "Classify a project update against the feed's recent important updates"
 
