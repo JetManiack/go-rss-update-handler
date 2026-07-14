@@ -1,0 +1,22 @@
+# VCS / IDE / local agent state
+.git
+.gitignore
+.dockerignore
+.idea
+.junie
+.remember
+
+# CI config (not needed inside the build)
+.github
+
+# Build artifacts, local DB, vendored deps (build uses `go mod download`)
+bin
+data
+vendor
+
+# Docs and non-build files
+docs
+assets
+*.md
+Makefile
+config.example.yaml

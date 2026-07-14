@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Test
+        run: make test
+
+      # make lint/gosec/govulncheck install the tools with the module's Go
+      # toolchain (golangci-lint refuses to run when built with an older Go).
+      - name: Lint
+        run: make lint
+
+      - name: gosec
+        run: make gosec
+
+      - name: govulncheck
+        run: make govulncheck
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          tags: gruh:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
