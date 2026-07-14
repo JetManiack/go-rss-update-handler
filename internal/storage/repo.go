@@ -40,6 +40,13 @@ type UpdateRepo interface {
 	LastImportant(ctx context.Context, feedID string, n int) ([]Update, error)
 	MarkDispatched(ctx context.Context, updateID string, channel string) error
 	IsDispatched(ctx context.Context, updateID string, channel string) (bool, error)
+	// ListPending returns updates that have not been classified yet
+	// (classified_at IS NULL), oldest-first, with raw content preloaded.
+	ListPending(ctx context.Context, limit int) ([]Update, error)
+	// ListUndispatchedImportant returns classified-important updates that still
+	// have at least one channel they were never delivered to, oldest-first, with
+	// raw content preloaded.
+	ListUndispatchedImportant(ctx context.Context, limit int) ([]Update, error)
 }
 
 // ChannelRepo defines operations on channels.
@@ -202,6 +209,44 @@ func (r *updateRepo) MarkDispatched(ctx context.Context, updateID string, channe
 			DoNothing: true,
 		}).Create(&dispatch).Error
 	})
+}
+
+// defaultReconcileLimit caps how many rows a single reconcile query returns
+// when the caller passes a non-positive limit.
+const defaultReconcileLimit = 500
+
+func (r *updateRepo) ListPending(ctx context.Context, limit int) ([]Update, error) {
+	if limit <= 0 {
+		limit = defaultReconcileLimit
+	}
+	var updates []Update
+	err := r.db.WithContext(ctx).
+		Where("classified_at IS NULL").
+		Preload("RawContent").
+		Order("published_at ASC, created_at ASC").
+		Limit(limit).
+		Find(&updates).Error
+	return updates, err
+}
+
+func (r *updateRepo) ListUndispatchedImportant(ctx context.Context, limit int) ([]Update, error) {
+	if limit <= 0 {
+		limit = defaultReconcileLimit
+	}
+	var updates []Update
+	// An important update still needs delivery while its feed maps to more
+	// channels than it has dispatch rows. Fully-delivered updates (and updates
+	// whose feed has no channels) are excluded, so this does not re-publish work
+	// that is already done on every tick.
+	err := r.db.WithContext(ctx).
+		Where("verdict_important = ? AND classified_at IS NOT NULL", true).
+		Where(`(SELECT COUNT(*) FROM feed_channels fc WHERE fc.feed_id = updates.feed_id) >
+		        (SELECT COUNT(*) FROM dispatches d WHERE d.update_id = updates.id)`).
+		Preload("RawContent").
+		Order("published_at ASC, created_at ASC").
+		Limit(limit).
+		Find(&updates).Error
+	return updates, err
 }
 
 type channelRepo struct {

@@ -82,6 +82,11 @@ func runCollector(ctx context.Context, cmd *cli.Command) error {
 
 	sched := scheduler.NewScheduler(cfg.Scheduler.Interval, float64(cfg.Scheduler.Jitter)/float64(cfg.Scheduler.Interval), nil)
 	go sched.Start(ctx, "collector-lock", func(ctx context.Context) {
+		// Re-drive updates left unclassified/undelivered before polling for new
+		// items, so a restart resumes the pipeline instead of stalling.
+		if err := orch.ReconcilePending(ctx); err != nil {
+			logger.Error("reconcile pending failed", "err", err)
+		}
 		feeds, err := db.Feeds().List(ctx)
 		if err != nil {
 			logger.Error("failed to list feeds", "err", err)
@@ -216,6 +221,13 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	}
 	sched := scheduler.NewScheduler(cfg.Scheduler.Interval, jitterFrac, nil)
 	go sched.Start(ctx, "collector", func(ctx context.Context) {
+		// Resume work the in-memory bus cannot recover on its own (updates left
+		// unclassified or undelivered across a restart) before polling for new
+		// items. Runs every tick as a safety net; the first tick fires at
+		// startup, after the worker/dispatcher subscriptions have registered.
+		if err := orch.ReconcilePending(ctx); err != nil {
+			logger.Error("reconcile pending failed", "err", err)
+		}
 		feeds, err := db.Feeds().List(ctx)
 		if err != nil {
 			logger.Error("failed to list feeds", "err", err)

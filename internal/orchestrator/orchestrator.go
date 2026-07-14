@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/google/uuid"
 	"github.com/JetManiack/go-rss-update-handler/internal/bus"
 	"github.com/JetManiack/go-rss-update-handler/internal/classificator"
 	"github.com/JetManiack/go-rss-update-handler/internal/collector"
@@ -16,7 +15,12 @@ import (
 	"github.com/JetManiack/go-rss-update-handler/internal/model"
 	"github.com/JetManiack/go-rss-update-handler/internal/parser"
 	"github.com/JetManiack/go-rss-update-handler/internal/storage"
+	"github.com/google/uuid"
 )
+
+// reconcileBatch caps how many pending/undispatched updates a single
+// ReconcilePending pass re-publishes; the rest are picked up on later passes.
+const reconcileBatch = 500
 
 type Orchestrator struct {
 	collector    *collector.Collector
@@ -90,37 +94,86 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 	metrics.UpdatesNew.Add(float64(len(inserted)))
 	o.logger.Info("feed processed", "feed", feed.URL, "parsed", len(events), "new", len(inserted))
 
-	// Publish (and therefore classify) oldest-first, so each update is compared
-	// against genuinely earlier ones when building classification history.
-	sort.SliceStable(inserted, func(i, j int) bool {
-		return inserted[i].PublishedAt.Before(inserted[j].PublishedAt)
-	})
+	// Surface publish failures instead of silently dropping them: an inserted
+	// update that was never published would otherwise be deduplicated forever
+	// and never classified.
+	return o.publishForClassification(ctx, inserted)
+}
 
+// messageFor builds the bus envelope for an update. RawContent may be nil (for
+// example after retention cleanup), in which case the event carries empty
+// content rather than panicking.
+func messageFor(u storage.Update) bus.Message {
+	var content string
+	if u.RawContent != nil {
+		content = u.RawContent.Content
+	}
+	return bus.Message{
+		ID:      uuid.New().String(),
+		Version: 1,
+		Event: model.UpdateEvent{
+			ID:          u.ID,
+			FeedID:      u.FeedID,
+			Title:       u.Title,
+			SourceURL:   u.SourceURL,
+			RawContent:  content,
+			PublishedAt: u.PublishedAt,
+			Fingerprint: u.Fingerprint,
+		},
+	}
+}
+
+// publishForClassification publishes updates to TopicUpdatesNew oldest-first, so
+// each update is compared against genuinely earlier ones when the classificator
+// builds its history. It joins any publish errors instead of dropping them.
+func (o *Orchestrator) publishForClassification(ctx context.Context, updates []storage.Update) error {
+	sort.SliceStable(updates, func(i, j int) bool {
+		return updates[i].PublishedAt.Before(updates[j].PublishedAt)
+	})
 	var pubErrs []error
-	for _, u := range inserted {
-		msg := bus.Message{
-			ID:      uuid.New().String(),
-			Version: 1,
-			Event: model.UpdateEvent{
-				ID:          u.ID,
-				FeedID:      u.FeedID,
-				Title:       u.Title,
-				SourceURL:   u.SourceURL,
-				RawContent:  u.RawContent.Content,
-				PublishedAt: u.PublishedAt,
-				Fingerprint: u.Fingerprint,
-			},
-		}
-		if err := o.bus.Publish(ctx, bus.TopicUpdatesNew, msg); err != nil {
+	for _, u := range updates {
+		if err := o.bus.Publish(ctx, bus.TopicUpdatesNew, messageFor(u)); err != nil {
 			o.logger.Error("failed to publish new update", "id", u.ID, "err", err)
 			pubErrs = append(pubErrs, err)
 		}
 	}
-
-	// Surface publish failures instead of silently dropping them: an inserted
-	// update that was never published would otherwise be deduplicated forever
-	// and never classified.
 	return errors.Join(pubErrs...)
+}
+
+// ReconcilePending re-drives work the in-memory bus cannot recover on its own:
+// updates persisted but never classified (e.g. left in flight across a restart,
+// or dropped after a classify error), and important updates that were never
+// delivered. It re-publishes them to the classification and delivery topics,
+// where the idempotent worker/dispatcher handle them exactly as new events.
+// It is safe to call repeatedly: classified/delivered updates fall out of the
+// queries, and re-processing overwrites verdicts / is dedup-guarded on delivery.
+func (o *Orchestrator) ReconcilePending(ctx context.Context) error {
+	var errs []error
+
+	pending, err := o.updates.ListPending(ctx, reconcileBatch)
+	if err != nil {
+		errs = append(errs, err)
+	} else if len(pending) > 0 {
+		o.logger.Info("reconciling unclassified updates", "count", len(pending))
+		if e := o.publishForClassification(ctx, pending); e != nil {
+			errs = append(errs, e)
+		}
+	}
+
+	undispatched, err := o.updates.ListUndispatchedImportant(ctx, reconcileBatch)
+	if err != nil {
+		errs = append(errs, err)
+	} else if len(undispatched) > 0 {
+		o.logger.Info("reconciling undispatched important updates", "count", len(undispatched))
+		for _, u := range undispatched {
+			if e := o.bus.Publish(ctx, bus.TopicUpdatesImportant, messageFor(u)); e != nil {
+				o.logger.Error("failed to republish important update", "id", u.ID, "err", e)
+				errs = append(errs, e)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // RunWorker consumes new updates, classifies them, persists the verdict, and

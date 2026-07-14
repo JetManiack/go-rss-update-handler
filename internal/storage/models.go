@@ -22,19 +22,20 @@ func (Feed) TableName() string {
 
 // Update represents a parsed update from a feed.
 type Update struct {
-	ID                string      `gorm:"primaryKey;type:varchar(36)"`
-	FeedID            string      `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
-	Fingerprint       string      `gorm:"uniqueIndex;not null;type:text"`
-	Title             string      `gorm:"type:text"`
-	SourceURL         string      `gorm:"type:text"`
-	PublishedAt       time.Time   `gorm:"not null;index:idx_updates_feed_important_published,priority:3"`
-	CreatedAt         time.Time   `gorm:"not null"`
-	VerdictImportant  *bool       `gorm:"index:idx_updates_feed_important_published,priority:2"` // Nullable
-	VerdictCategory   string      `gorm:"type:text"`
-	VerdictConfidence float64     `gorm:"type:real"`
-	VerdictReason     string      `gorm:"type:text"`
-	ClassifiedAt      *time.Time  // Nullable
-	RawContent        *RawContent `gorm:"foreignKey:UpdateID;constraint:OnDelete:CASCADE"`
+	ID                string     `gorm:"primaryKey;type:varchar(36)"`
+	FeedID            string     `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
+	Fingerprint       string     `gorm:"uniqueIndex;not null;type:text"`
+	Title             string     `gorm:"type:text"`
+	SourceURL         string     `gorm:"type:text"`
+	PublishedAt       time.Time  `gorm:"not null;index:idx_updates_feed_important_published,priority:3"`
+	CreatedAt         time.Time  `gorm:"not null"`
+	VerdictImportant  *bool      `gorm:"index:idx_updates_feed_important_published,priority:2"` // Nullable
+	VerdictCategory   string     `gorm:"type:text"`
+	VerdictConfidence float64    `gorm:"type:real"`
+	VerdictReason     string     `gorm:"type:text"`
+	ClassifiedAt      *time.Time `gorm:"index"` // Nullable; indexed for the pending-reconcile scan
+
+	RawContent *RawContent `gorm:"foreignKey:UpdateID;constraint:OnDelete:CASCADE"`
 }
 
 // TableName overrides the default table name for Update.
