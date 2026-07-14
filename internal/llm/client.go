@@ -12,6 +12,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/jetbrains/go-rss-update-handler/internal/metrics"
 )
 
 // Request defines the input for the LLM.
@@ -80,6 +82,20 @@ func (c *client) Complete(ctx context.Context, req Request) (Response, error) {
 		return Response{}, ctx.Err()
 	}
 
+	start := time.Now()
+	out, err := c.doComplete(ctx, req)
+	metrics.LLMDuration.Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.LLMRequests.WithLabelValues("error").Inc()
+	} else {
+		metrics.LLMRequests.WithLabelValues("ok").Inc()
+		metrics.LLMTokens.WithLabelValues("prompt").Add(float64(out.PromptTokens))
+		metrics.LLMTokens.WithLabelValues("completion").Add(float64(out.CompletionTokens))
+	}
+	return out, err
+}
+
+func (c *client) doComplete(ctx context.Context, req Request) (Response, error) {
 	ctx, span := c.tracer.Start(ctx, "llm.Complete")
 	defer span.End()
 

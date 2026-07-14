@@ -11,6 +11,7 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/collector"
 	"github.com/jetbrains/go-rss-update-handler/internal/deduplicator"
 	"github.com/jetbrains/go-rss-update-handler/internal/dispatcher"
+	"github.com/jetbrains/go-rss-update-handler/internal/metrics"
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
 	"github.com/jetbrains/go-rss-update-handler/internal/parser"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
@@ -50,11 +51,14 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 		LastModified: feed.LastModified,
 	})
 	if err != nil {
+		metrics.FeedFetches.WithLabelValues("error").Inc()
 		return err
 	}
 	if res.NotModified {
+		metrics.FeedFetches.WithLabelValues("not_modified").Inc()
 		return nil
 	}
+	metrics.FeedFetches.WithLabelValues("ok").Inc()
 
 	if err := o.feeds.UpdateCacheHeaders(ctx, feed.ID, res.ETag, res.LastModified); err != nil {
 		o.logger.Error("failed to update cache headers", "err", err)
@@ -81,6 +85,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 	if err != nil {
 		return err
 	}
+	metrics.UpdatesNew.Add(float64(len(inserted)))
 
 	var pubErrs []error
 	for _, u := range inserted {
@@ -132,8 +137,10 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 			return err
 		}
 		if verdict.Important {
+			metrics.Classifications.WithLabelValues("important").Inc()
 			return o.bus.Publish(ctx, bus.TopicUpdatesImportant, msg)
 		}
+		metrics.Classifications.WithLabelValues("noise").Inc()
 		return nil
 	})
 }
@@ -171,8 +178,10 @@ func (o *Orchestrator) RunDispatcher(ctx context.Context) error {
 			Verdict: verdict,
 			FeedURL: msg.Event.SourceURL,
 		}, pending); err != nil {
+			metrics.Dispatches.WithLabelValues("error").Inc()
 			return err
 		}
+		metrics.Dispatches.WithLabelValues("ok").Add(float64(len(pending)))
 		for _, ch := range pending {
 			if err := o.updates.MarkDispatched(ctx, msg.Event.ID, ch); err != nil {
 				return err

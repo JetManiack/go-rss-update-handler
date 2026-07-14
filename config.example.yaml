@@ -15,3 +15,4 @@ observability:
   log:
     level: info
     format: json
+  metrics: ":9090"   # address for the /metrics + /healthz + /readyz server ("" disables it)

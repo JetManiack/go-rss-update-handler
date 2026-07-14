@@ -8,6 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/jetbrains/go-rss-update-handler/internal/metrics"
 )
 
 func TestComplete_RetryWithBody(t *testing.T) {
@@ -81,6 +85,28 @@ func TestComplete_ExhaustedRetriesReturnsStatusError(t *testing.T) {
 	}
 	if attempts.Load() != 2 {
 		t.Errorf("expected 2 attempts, got %d", attempts.Load())
+	}
+}
+
+func TestComplete_RecordsMetrics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":5},"model":"test"}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, APIKey: "x", Model: "test"})
+
+	before := testutil.ToFloat64(metrics.LLMRequests.WithLabelValues("ok"))
+	beforeTok := testutil.ToFloat64(metrics.LLMTokens.WithLabelValues("prompt"))
+	if _, err := client.Complete(context.Background(), Request{}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if after := testutil.ToFloat64(metrics.LLMRequests.WithLabelValues("ok")); after <= before {
+		t.Errorf("LLMRequests{ok} did not increment: before=%v after=%v", before, after)
+	}
+	if after := testutil.ToFloat64(metrics.LLMTokens.WithLabelValues("prompt")); after <= beforeTok {
+		t.Errorf("LLMTokens{prompt} did not increment: before=%v after=%v", beforeTok, after)
 	}
 }
 

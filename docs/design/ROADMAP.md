@@ -119,11 +119,15 @@ All phases are implemented following a unified process:
 
 **Goal:** users receive notifications about important updates.
 
-- [ ] `internal/dispatcher`: general `Notifier` interface
-- [ ] Implementations: Webhook → Slack → Telegram
-- [ ] Notification text templates: Go template, defaults via `go:embed`,
-- [ ] Routing based on `Feed URL -> channels` mapping
-- [ ] Delivery retry policy and protection against duplicate sending
+- [x] `internal/dispatcher`: general `Notifier` interface
+- [x] Routing based on `Feed URL -> channels` mapping (orchestrator `RunDispatcher`)
+- [x] Protection against duplicate sending (idempotent `dispatches` table:
+  `IsDispatched` / `MarkDispatched`)
+- [ ] Implementations: Webhook → Slack → Telegram — **deferred**: a basic template-based
+  sender exists; the rich per-transport formats (webhook structured JSON, Slack Block Kit,
+  Telegram MarkdownV2 + escaping) and their delivery-retry policy will be finished **after
+  integration testing on a live feed + LLM** (project-owner decision)
+- [ ] Notification text templates: per-transport defaults via `go:embed` — deferred (see above)
 
 **Documents:** [10-dispatcher.md](modules/10-dispatcher.md)
 
@@ -132,6 +136,11 @@ All phases are implemented following a unified process:
 ## Phase 5 — Distributed Mode (Redis)
 
 **Goal:** horizontal scaling in k8s.
+
+> **Deferred for the current CLI target.** Horizontal scaling in k8s is out of scope for a
+> CLI binary aimed at integration/load testing; the monolith runs on the in-memory bus. The
+> Redis bus (Streams, consumer groups, ack/retry, DLQ, `XAUTOCLAIM`) and distributed scheduler
+> locks are revisited when moving to k8s.
 
 - [ ] Redis-based `internal/bus` implementation (Streams + consumer groups, ack/retry, DLQ)
 - [ ] Process role separation: collector / worker(classificator) / dispatcher —
@@ -145,7 +154,9 @@ All phases are implemented following a unified process:
 
 **Goal:** production-ready deployment.
 
-- [ ] Prometheus metrics for all modules (`/metrics`), health/readiness probes
+- [x] Prometheus metrics for the pipeline (`gruh_*` in `internal/metrics`), served at `/metrics`;
+  `/healthz` + `/readyz` probes (contextual logging `WithLogAttrs` and Langfuse OTEL export
+  remain deferred)
 - DEFERRED: `Dockerfile` (multi-stage, distroless)
 - DEFERRED: Helm charts in `deploy/`, `skaffold.yaml`
 - DEFERRED: HPA based on queue/CPU metrics
