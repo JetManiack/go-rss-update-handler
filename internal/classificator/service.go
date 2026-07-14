@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jetbrains/go-rss-update-handler/internal/llm"
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
+// Service classifies an update into an importance verdict. History (the recent
+// important updates for the feed) is supplied by the caller — the classificator
+// does not read from storage itself.
 type Service interface {
-	Classify(ctx context.Context, update model.UpdateEvent) (storage.Verdict, error)
+	Classify(ctx context.Context, update model.UpdateEvent, history []storage.Update) (storage.Verdict, error)
 }
 
 // PromptManager renders a named prompt blueprint into system and user messages.
@@ -22,22 +26,22 @@ type PromptManager interface {
 type service struct {
 	llm     llm.Client
 	prompts PromptManager
-	repo    storage.UpdateRepo
+	cfg     Config
 }
 
-func New(llm llm.Client, prompts PromptManager, repo storage.UpdateRepo) Service {
-	return &service{llm: llm, prompts: prompts, repo: repo}
+func New(llmClient llm.Client, prompts PromptManager, cfg Config) Service {
+	return &service{llm: llmClient, prompts: prompts, cfg: cfg}
 }
 
-func (s *service) Classify(ctx context.Context, update model.UpdateEvent) (storage.Verdict, error) {
-	// 1. Fetch context (2 latest important updates for the feed)
-	// We need feedID for LastImportant. model.UpdateEvent should contain FeedID.
-	history, err := s.repo.LastImportant(ctx, update.FeedID, 2)
-	if err != nil {
-		return storage.Verdict{}, fmt.Errorf("fetch history: %w", err)
-	}
+// verdictJSON is the raw shape the LLM is asked to produce.
+type verdictJSON struct {
+	Important  bool    `json:"important"`
+	Category   string  `json:"category"`
+	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}
 
-	// 2. Render prompt (system + user) from the classify blueprint
+func (s *service) Classify(ctx context.Context, update model.UpdateEvent, history []storage.Update) (storage.Verdict, error) {
 	data := map[string]any{
 		"Current": update,
 		"History": history,
@@ -47,34 +51,65 @@ func (s *service) Classify(ctx context.Context, update model.UpdateEvent) (stora
 		return storage.Verdict{}, fmt.Errorf("render prompt: %w", err)
 	}
 
-	// 3. Call LLM
-	llmReq := llm.Request{
-		System:      system,
-		User:        user,
-		JSONMode:    true,
-		Temperature: 0.1,
+	var lastParseErr error
+	for attempt := 0; attempt <= s.cfg.MaxFormatRetries; attempt++ {
+		userMsg := user
+		if lastParseErr != nil {
+			userMsg = user + "\n\nYour previous reply was not valid: " + lastParseErr.Error() +
+				"\nReply with a single valid JSON object only."
+		}
+
+		resp, err := s.llm.Complete(ctx, llm.Request{
+			System:      system,
+			User:        userMsg,
+			JSONMode:    true,
+			Temperature: 0.1,
+		})
+		if err != nil {
+			// LLM unavailable — fail fast; do not persist a fabricated verdict.
+			return storage.Verdict{}, fmt.Errorf("llm call: %w", err)
+		}
+
+		v, perr := parseVerdict(resp.Content)
+		if perr != nil {
+			lastParseErr = perr
+			continue
+		}
+		return s.applyRules(v), nil
 	}
 
-	llmResp, err := s.llm.Complete(ctx, llmReq)
-	if err != nil {
-		return storage.Verdict{}, fmt.Errorf("llm call: %w", err)
-	}
-
-	// 4. Parse response
-	var v struct {
-		Important  bool    `json:"important"`
-		Category   string  `json:"category"`
-		Confidence float64 `json:"confidence"`
-		Reason     string  `json:"reason"`
-	}
-	if err := json.Unmarshal([]byte(llmResp.Content), &v); err != nil {
-		return storage.Verdict{}, fmt.Errorf("unmarshal llm response: %w", err)
-	}
-
+	// Exhausted format retries: mark as failed (not important) without crashing
+	// the pipeline for a single malformed response.
 	return storage.Verdict{
-		Important:  v.Important,
+		Important: false,
+		Category:  "unclassified",
+		Reason:    fmt.Sprintf("classification failed: %v", lastParseErr),
+	}, nil
+}
+
+// applyRules converts the raw LLM verdict into the stored verdict: a
+// below-threshold "important" becomes noise, and a security update is always
+// important regardless of confidence.
+func (s *service) applyRules(v verdictJSON) storage.Verdict {
+	important := v.Important && v.Confidence >= s.cfg.ConfidenceThreshold
+	if strings.EqualFold(v.Category, "security") {
+		important = true
+	}
+	return storage.Verdict{
+		Important:  important,
 		Category:   v.Category,
 		Confidence: v.Confidence,
 		Reason:     v.Reason,
-	}, nil
+	}
+}
+
+func parseVerdict(content string) (verdictJSON, error) {
+	var v verdictJSON
+	if err := json.Unmarshal([]byte(content), &v); err != nil {
+		return verdictJSON{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if v.Confidence < 0 || v.Confidence > 1 {
+		return verdictJSON{}, fmt.Errorf("confidence %v out of range [0,1]", v.Confidence)
+	}
+	return v, nil
 }

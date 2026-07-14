@@ -95,16 +95,20 @@ All phases are implemented following a unified process:
 
 **Goal:** separating important updates from noise.
 
-- [ ] `internal/llm`: OpenAI-compatible client (timeouts, retry, token accounting)
-- [ ] `internal/prompt`: built-in blueprints via `go:embed`, override from user directory by `name`;
+- [x] `internal/llm`: OpenAI-compatible client (timeouts, retry on network/5xx/429 with
+  `Retry-After`, concurrency semaphore, `finish_reason` handling, token accounting in the
+  response; Prometheus metric emission is part of Phase 6)
+- [x] `internal/prompt`: built-in blueprints via `go:embed`, override from user directory by `name`;
   single YAML file per prompt with `system`/`user` Go templates and metadata
   (`name`/`version`/`critical`/`description`, see [09-prompt.md](modules/09-prompt.md) §4)
-- [ ] `internal/classificator`: importance verdict; context = current update + 2 last important;
-  confidence threshold 0.5, security patches always important (rule on top of LLM)
-- [ ] Storing verdicts and history of important updates in `storage`
-- [ ] LLM unavailability (after retries) — fail fast: error and crash without saving
-  classification state (fallback between models — on LiteLLM side, not in app)
-- [ ] LLM telemetry: classification traces in **Langfuse** via OTEL/OTLP (GenAI attributes, tokens, prompt version)
+- [x] `internal/classificator`: importance verdict; context = current update + 2 last important
+  (supplied by the orchestrator); confidence threshold 0.5, security always important,
+  response validation with bounded format retries
+- [x] Storing verdicts and history of important updates in `storage` (via the orchestrator)
+- [x] LLM unavailability (after retries) — fail fast: error without saving a fabricated verdict
+  (a malformed-but-reachable response instead marks the update unclassified, no crash)
+- [ ] LLM telemetry: classification traces in **Langfuse** via OTEL/OTLP (GenAI attributes, tokens,
+  prompt version) — deferred to Phase 6 (observability)
 
 **Documents:** [07-classificator.md](modules/07-classificator.md), [08-llm.md](modules/08-llm.md),
 [09-prompt.md](modules/09-prompt.md), [12-observability.md](modules/12-observability.md)

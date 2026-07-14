@@ -118,7 +118,7 @@ func runWorker(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	classificatorSvc := classificator.New(llmClient, prompts, db.Updates())
+	classificatorSvc := classificator.New(llmClient, prompts, cfg.Classificator)
 	disp := initDispatcher(cfg.Dispatcher)
 	orch := orchestrator.NewOrchestrator(nil, nil, nil, b, db.Feeds(), db.Updates(), classificatorSvc, disp, logger)
 	return orch.RunWorker(ctx)
@@ -190,7 +190,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("new prompt registry: %w", err)
 	}
-	classificatorSvc := classificator.New(llmClient, prompts, db.Updates())
+	classificatorSvc := classificator.New(llmClient, prompts, cfg.Classificator)
 	disp := initDispatcher(cfg.Dispatcher)
 	orch := orchestrator.NewOrchestrator(c, p, d, b, db.Feeds(), db.Updates(), classificatorSvc, disp, logger)
 

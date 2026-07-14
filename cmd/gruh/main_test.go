@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
+	"github.com/urfave/cli/v3"
 	"os"
 	"testing"
-	"github.com/urfave/cli/v3"
 )
 
 func TestRun(t *testing.T) {
 	os.Args = []string{"gruh", "--config", "test.yaml", "--check-config"}
-	
+
 	cmd := &cli.Command{
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "config"},
@@ -25,7 +25,7 @@ func TestRun(t *testing.T) {
 			return nil
 		},
 	}
-	
+
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}

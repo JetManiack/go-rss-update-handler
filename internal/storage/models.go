@@ -55,11 +55,11 @@ func (RawContent) TableName() string {
 
 // Channel represents a notification channel (e.g. Telegram, Slack, Webhook).
 type Channel struct {
-	ID         string    `gorm:"primaryKey;type:varchar(36)"`
-	Name       string    `gorm:"uniqueIndex;not null;type:text"`
-	Type       string    `gorm:"type:text;not null"`
-	ConfigJSON string    `gorm:"type:text;not null"`
-	Feeds      []Feed    `gorm:"many2many:feed_channels;joinForeignKey:ChannelID;joinReferences:FeedID"`
+	ID         string `gorm:"primaryKey;type:varchar(36)"`
+	Name       string `gorm:"uniqueIndex;not null;type:text"`
+	Type       string `gorm:"type:text;not null"`
+	ConfigJSON string `gorm:"type:text;not null"`
+	Feeds      []Feed `gorm:"many2many:feed_channels;joinForeignKey:ChannelID;joinReferences:FeedID"`
 }
 
 // TableName overrides the default table name for Channel.

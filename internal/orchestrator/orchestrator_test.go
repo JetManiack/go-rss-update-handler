@@ -98,7 +98,7 @@ func newTestFixture(t *testing.T) *testFixture {
 	p := parser.NewParser()
 	d := deduplicator.NewDeduplicator()
 	b := bus.NewMemoryBus()
-	classifierSvc := classificator.New(&fakeLLM{}, &fakePrompts{}, store.Updates())
+	classifierSvc := classificator.New(&fakeLLM{}, &fakePrompts{}, classificator.Config{ConfidenceThreshold: 0.5, MaxFormatRetries: 2})
 
 	orch := NewOrchestrator(c, p, d, b, store.Feeds(), store.Updates(), classifierSvc, &dispatcher.Service{Notifiers: make(map[string]dispatcher.Notifier)}, slog.Default())
 

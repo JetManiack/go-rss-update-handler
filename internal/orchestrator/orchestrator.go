@@ -113,7 +113,13 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 // (and its idempotency) is the dispatcher role's job (RunDispatcher).
 func (o *Orchestrator) RunWorker(ctx context.Context) error {
 	return o.bus.Subscribe(ctx, bus.TopicUpdatesNew, "classificator", func(ctx context.Context, msg bus.Message) error {
-		verdict, err := o.classifier.Classify(ctx, msg.Event)
+		// The orchestrator supplies the classification context (recent important
+		// updates for the feed); the classificator does not touch storage.
+		history, err := o.updates.LastImportant(ctx, msg.Event.FeedID, 2)
+		if err != nil {
+			return err
+		}
+		verdict, err := o.classifier.Classify(ctx, msg.Event, history)
 		if err != nil {
 			return err
 		}

@@ -14,7 +14,7 @@ user: |
   {{ .Current.RawContent }}
 
   ## Most recent important updates (for comparison)
-  {{ range .History }}- {{ .Event.PublishedAt }}: {{ .Verdict.Reason }}
+  {{ range .History }}- {{ .PublishedAt }}: {{ .VerdictReason }}
   {{ else }}No important-update history.
   {{ end }}
   Respond strictly as JSON: {"important": bool, "category": string, "confidence": float, "reason": string}
