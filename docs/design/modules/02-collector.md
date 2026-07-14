@@ -1,29 +1,29 @@
 # 02. Collector (`internal/collector`)
 
-## 1. Назначение
+## 1. Purpose
 
-Загружает сырое содержимое фида по HTTP по задаче от планировщика. Обязан использовать
-условные запросы (`ETag` / `If-Modified-Since`) — критично для GitHub, который активно
-поддерживает 304 и rate limits.
+Downloads the raw content of a feed over HTTP based on a task from the scheduler. Must use
+conditional requests (`ETag` / `If-Modified-Since`) — critical for GitHub, which actively
+supports 304 responses and rate limits.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* HTTP GET с условными заголовками (`If-None-Match: <etag>`, `If-Modified-Since`).
-* Хранит/обновляет `ETag` и `Last-Modified` по каждому фиду (через `storage`).
-* Rate limiting per-host (например, `golang.org/x/time/rate`).
-* Retry с экспоненциальным backoff на сетевые ошибки и 5xx; уважение `Retry-After` при 429.
-* Возвращает сырой контент (`[]byte`) и метаданные ответа.
+**Does:**
+* HTTP GET with conditional headers (`If-None-Match: <etag>`, `If-Modified-Since`).
+* Stores/updates `ETag` and `Last-Modified` per feed (via `storage`).
+* Per-host rate limiting (e.g., `golang.org/x/time/rate`).
+* Retry with exponential backoff on network errors and 5xx; respects `Retry-After` on 429.
+* Returns raw content (`[]byte`) and response metadata.
 
-**НЕ делает:**
-* Не парсит содержимое (это `parser`).
-* Не решает, когда опрашивать (это `scheduler`).
+**Does NOT:**
+* Does not parse content (that is `parser`).
+* Does not decide when to poll (that is `scheduler`).
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Collector interface {
-	// Fetch возвращает результат загрузки; NotModified == true при 304.
+	// Fetch returns the fetch result; NotModified == true on 304.
 	Fetch(ctx context.Context, feed FeedRef) (FetchResult, error)
 }
 
@@ -43,20 +43,20 @@ type FetchResult struct {
 }
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-* Один переиспользуемый `http.Client` с таймаутами (connect, total) и лимитом размера тела ответа.
-* Per-host `rate.Limiter`, хранимый в map с мьютексом (host извлекается из URL).
-* Кастомный `User-Agent` (`gruh/<version>`), поддержка редиректов с ограничением.
-* Условные заголовки: если сервер вернул 304 — результат `NotModified`, тело не читается,
-  новые ETag/Last-Modified при наличии сохраняются.
+* One reusable `http.Client` with timeouts (connect, total) and a response body size limit.
+* Per-host `rate.Limiter` stored in a map with a mutex (host is extracted from the URL).
+* Custom `User-Agent` (`gruh/<version>`), redirect support with a limit.
+* Conditional headers: if the server returns 304 — result is `NotModified`, body is not read;
+  new ETag/Last-Modified values, if present, are saved.
 
-## 5. Зависимости
+## 5. Dependencies
 
-* `internal/storage` — персистентность ETag/Last-Modified (через вызывающую сторону или интерфейс).
+* `internal/storage` — ETag/Last-Modified persistence (via the caller or an interface).
 * stdlib `net/http`, `golang.org/x/time/rate`.
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 collector:
@@ -68,23 +68,23 @@ collector:
   backoff_base: 2s
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* `429 Too Many Requests` — уважать `Retry-After`, снижать частоту (сигнал планировщику).
-* `404/410` — фид умер: пометить в storage, уведомить (не ретраить бесконечно).
-* Слишком большое тело / не-XML контент — ошибка с диагностикой, без падения процесса.
-* Редиректы 301 — опционально обновлять URL фида в storage.
-* Обрыв соединения посреди тела — retry с backoff.
+* `429 Too Many Requests` — respect `Retry-After`, reduce frequency (signal to the scheduler).
+* `404/410` — feed is dead: mark in storage, notify (do not retry indefinitely).
+* Oversized body / non-XML content — error with diagnostics, without crashing the process.
+* 301 redirects — optionally update the feed URL in storage.
+* Connection interrupted mid-body — retry with backoff.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit с `httptest.Server`: сценарии 200/304/404/429/5xx, проверка условных заголовков.
-* Проверка rate limiter (несколько URL одного хоста), ограничения размера тела, ретраев.
+* Unit with `httptest.Server`: scenarios 200/304/404/429/5xx, verification of conditional headers.
+* Verification of rate limiter (multiple URLs on the same host), body size limit, retries.
 
-## 9. Принятые решения (бывшие открытые вопросы)
+## 9. Accepted Decisions (formerly open questions)
 
-* **Сигнал для adaptive polling — да**: adaptive polling принят (см. [01-scheduler.md](01-scheduler.md) §2);
-  collector возвращает результат опроса (`NotModified`/ошибка/новый контент) в `FetchResult`,
-  планировщик использует его для backoff «тихих» фидов.
-* **HTTP-прокси / кастомные CA — нет**: не поддерживаются и не планируются
-  (используется системный пул CA и прямое соединение).
+* **Signal for adaptive polling — yes**: adaptive polling is accepted (see [01-scheduler.md](01-scheduler.md) §2);
+  collector returns the poll result (`NotModified`/error/new content) in `FetchResult`,
+  and the scheduler uses it for backoff on "quiet" feeds.
+* **HTTP proxy / custom CA — no**: not supported and not planned
+  (the system CA pool and direct connection are used).

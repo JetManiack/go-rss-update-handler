@@ -1,24 +1,24 @@
 # 11. Storage (`internal/storage`)
 
-## 1. Назначение
+## 1. Purpose
 
-Сквозной слой персистентности на **GORM**: PostgreSQL в проде, SQLite локально и в тестах.
-Хранит фиды, обновления, вердикты, историю важных обновлений, маппинг на каналы и статусы доставки.
-Единственный модуль, работающий с БД, — остальные видят только интерфейсы-репозитории.
+A cross-cutting persistence layer built on **GORM**: PostgreSQL in production, SQLite locally and in tests.
+Stores feeds, updates, verdicts, important update history, channel mappings, and delivery statuses.
+The only module that works with the DB — all others see only repository interfaces.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Модели, миграции, репозитории (CRUD + специализированные запросы).
-* Атомарную регистрацию fingerprint'ов (уникальный индекс, `ON CONFLICT DO NOTHING`).
-* Запрос «N последних важных обновлений фида» для LLM-контекста.
-* Хранение `ETag`/`Last-Modified` per feed для collector'а.
+**Does:**
+* Models, migrations, repositories (CRUD + specialized queries).
+* Atomic fingerprint registration (unique index, `ON CONFLICT DO NOTHING`).
+* Query for "N most recent important updates for a feed" for LLM context.
+* Stores `ETag`/`Last-Modified` per feed for the collector.
 
-**НЕ делает:**
-* Не содержит бизнес-логики (границы важности, расписание — не здесь).
-* Не кэширует (Redis-кэш — забота вызывающих модулей).
+**Does NOT:**
+* Does not contain business logic (importance boundaries, schedules — not here).
+* Does not cache (Redis cache — the responsibility of calling modules).
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Store interface {
@@ -34,7 +34,7 @@ type FeedRepo interface {
 }
 
 type UpdateRepo interface {
-	// InsertNew атомарно вставляет обновления, возвращая только реально новые (дедупликация).
+	// InsertNew atomically inserts updates, returning only the actually new ones (deduplication).
 	InsertNew(ctx context.Context, updates []Update) ([]Update, error)
 	SaveVerdict(ctx context.Context, updateID int64, v Verdict) error
 	LastImportant(ctx context.Context, feedID int64, n int) ([]Update, error)
@@ -42,89 +42,89 @@ type UpdateRepo interface {
 }
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-### Схема данных
+### Data Schema
 
 ```
 feeds
   id, url (unique), etag, last_modified, active, created_at
-  # интервалы опроса в БД не хранятся — они в конфиге (см. 13-config.md)
+  # polling intervals are not stored in the DB — they are in the config (see 13-config.md)
 
 updates
   id, feed_id (fk), fingerprint (unique), source_url,
   published_at, created_at,
   verdict_important (nullable), verdict_category, verdict_confidence,
   verdict_reason, classified_at
-  # fingerprint и вердикт хранятся вечно (см. §9), raw_content вынесен в raw_contents
+  # fingerprint and verdict are stored forever (see §9), raw_content is moved to raw_contents
 
-raw_contents             # сырой контент вынесен отдельно для retention-политики
+raw_contents             # raw content moved to a separate table for retention policy
   update_id (fk, PK), content (TEXT), created_at
 
 channels
   id, name (unique), type, config_json
 
-feed_channels            # маппинг Feed URL -> каналы
+feed_channels            # Feed URL -> channels mapping
   feed_id (fk), channel_id (fk), PK(feed_id, channel_id)
 
-dispatches               # факты доставки (идемпотентность)
+dispatches               # delivery facts (idempotency)
   update_id (fk), channel_id (fk), delivered_at, PK(update_id, channel_id)
 ```
 
-* «Важное обновление» = `updates.verdict_important = true` — отдельная таблица не нужна;
-  `LastImportant` — запрос с `ORDER BY published_at DESC LIMIT n`.
-* `raw_contents` — 1:1 к `updates`; строки `updates` (fingerprint + вердикт) живут вечно,
-  а тяжёлый сырой контент чистится retention-джобой по `raw_contents.created_at`
-  (порог — `storage.raw_content_retention` в конфиге, `0` = хранить вечно).
-* Индексы: `updates(feed_id, verdict_important, published_at)`, `updates(fingerprint) unique`.
-* Миграции: старт с GORM `AutoMigrate`; переход на версионированные (golang-migrate) при первом breaking-изменении схемы.
-* Диалект выбирается по DSN конфига; вся логика запросов совместима с обоими диалектами
-  (ON CONFLICT поддержан и в PostgreSQL, и в SQLite).
+* "Important update" = `updates.verdict_important = true` — no separate table needed;
+  `LastImportant` is a query with `ORDER BY published_at DESC LIMIT n`.
+* `raw_contents` — 1:1 with `updates`; `updates` rows (fingerprint + verdict) live forever,
+  while the heavy raw content is cleaned by a retention job on `raw_contents.created_at`
+  (threshold — `storage.raw_content_retention` in config, `0` = store forever).
+* Indexes: `updates(feed_id, verdict_important, published_at)`, `updates(fingerprint) unique`.
+* Migrations: start with GORM `AutoMigrate`; switch to versioned (golang-migrate) on the first breaking schema change.
+* Dialect is selected by the config DSN; all query logic is compatible with both dialects
+  (ON CONFLICT is supported in both PostgreSQL and SQLite).
 
-## 5. Зависимости
+## 5. Dependencies
 
 * `gorm.io/gorm`, `gorm.io/driver/postgres`, `gorm.io/driver/sqlite`.
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 storage:
   driver: postgres            # postgres | sqlite
-  dsn: env GRUH_DB_DSN        # секреты из env
+  dsn: env GRUH_DB_DSN        # secrets from env
   max_open_conns: 10
   log_queries: false
-  raw_content_retention: 90d  # срок хранения raw_contents; 0 = вечно
+  raw_content_retention: 90d  # raw_contents retention period; 0 = forever
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Конфликт fingerprint при конкурентной вставке — не ошибка: `InsertNew` возвращает запись как «не новую».
-* Недоступность БД — типизированные ошибки наверх; ретраи и политика — на вызывающей стороне.
-* Большой сырой контент — тип `TEXT` в `raw_contents`, лимит контролируется parser'ом.
-* Обращение к уже вычищенному `raw_contents` (контент удалён retention'ом) — валидный случай:
-  репозиторий возвращает «контента нет», вызывающий код обязан это учитывать.
-* SQLite и конкуренция — `busy_timeout`, WAL-режим; в распределённом режиме SQLite запрещён (валидация конфига).
-* Рост объёма данных — контролируется retention-политикой `raw_contents` (решено, см. §9).
+* Fingerprint conflict on concurrent insert — not an error: `InsertNew` returns the record as "not new".
+* DB unavailable — typed errors propagated up; retries and policy are on the caller's side.
+* Large raw content — `TEXT` type in `raw_contents`, limit controlled by the parser.
+* Access to already-cleaned `raw_contents` (content deleted by retention) — valid case:
+  repository returns "no content", calling code must handle this.
+* SQLite and concurrency — `busy_timeout`, WAL mode; SQLite is prohibited in distributed mode (config validation).
+* Data volume growth — controlled by the `raw_contents` retention policy (resolved, see §9).
 
-## 8. Тестирование
+## 8. Testing
 
-* Репозиторные тесты на SQLite in-memory (быстро, без инфраструктуры).
-* Прогон того же набора на PostgreSQL через testcontainers в CI (совместимость диалектов).
-* Обязательные сценарии: конкурентный `InsertNew`, `LastImportant` с граничными n, идемпотентный `MarkDispatched`.
+* Repository tests on in-memory SQLite (fast, no infrastructure).
+* Same suite run on PostgreSQL via testcontainers in CI (dialect compatibility).
+* Mandatory scenarios: concurrent `InsertNew`, `LastImportant` with boundary n values, idempotent `MarkDispatched`.
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Источник истины — решено (БД)**: фиды, каналы (`config_json`) и маппинг
-  `feed_channels` живут в БД; пока управление — напрямую в БД (seed/SQL-скрипты),
-  отдельным шагом будут разработаны управляющие транспорты — Slack/Telegram-бот
-  (фаза 7); CLI-команд управления нет (CLI — одна рут-команда, целимся в k8s —
-  ручные команды лишние, см. [00-overview.md](../00-overview.md) §7). Интервалы
-  опроса и технические параметры — в конфиге. См. [13-config.md](13-config.md).
-* **Недоступность БД — решено (fail fast)**: БД — обязательная зависимость,
-  приложение выдаёт ошибку и падает (см. [04-deduplicator.md](04-deduplicator.md) §9).
-* **Retention — решено**: сырой контент вынесен в отдельную таблицу `raw_contents`
-  (1:1 к `updates`), и его хранением управляет retention-политика
-  (`storage.raw_content_retention`, периодическое удаление старых строк).
-  Строки `updates` — **fingerprint и вердикт — хранятся вечно**: fingerprint'ы нужны
-  для дедупликации (удаление → риск повторных уведомлений о старых записях фида),
-  вердикты — для LLM-контекста и eval (фаза 7).
+* **Source of truth — resolved (DB)**: feeds, channels (`config_json`), and the
+  `feed_channels` mapping live in the DB; currently managed directly in the DB (seed/SQL scripts);
+  management transports — a Slack/Telegram bot — will be developed as a separate step (phase 7);
+  no CLI management commands (CLI is a single root command, targeting k8s —
+  manual commands are unnecessary, see [00-overview.md](../00-overview.md) §7). Polling
+  intervals and technical parameters are in the config. See [13-config.md](13-config.md).
+* **DB unavailability — resolved (fail fast)**: DB is a mandatory dependency,
+  the application returns an error and crashes (see [04-deduplicator.md](04-deduplicator.md) §9).
+* **Retention — resolved**: raw content is moved to a separate `raw_contents` table
+  (1:1 with `updates`), and its storage is managed by a retention policy
+  (`storage.raw_content_retention`, periodic deletion of old rows).
+  `updates` rows — **fingerprint and verdict — are stored forever**: fingerprints are needed
+  for deduplication (deleting them risks duplicate notifications about old feed entries);
+  verdicts are needed for LLM context and eval (phase 7).

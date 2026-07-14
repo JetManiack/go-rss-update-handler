@@ -47,6 +47,7 @@ func (p *Parser) Parse(ctx context.Context, feedURL string, body []byte) ([]mode
 		}
 
 		events = append(events, model.UpdateEvent{
+			Title:       item.Title,
 			SourceURL:   item.Link,
 			RawContent:  content,
 			PublishedAt: pub.UTC(),

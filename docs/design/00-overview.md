@@ -1,23 +1,23 @@
-# 00. Архитектурный обзор GRUH
+# 00. GRUH Architectural Overview
 
-## 1. Назначение системы
+## 1. System Purpose
 
-**GRUH (Go RSS Update Handler)** — система обработки RSS/Atom-фидов (в первую очередь GitHub Atom),
-которая с помощью LLM отделяет «шум» (dev-теги, RC-релизы, минорные бампы) от «важных» обновлений
-(мажорные релизы, breaking changes, критичные security-патчи) и уведомляет пользователей только о важном.
+**GRUH (Go RSS Update Handler)** is a system for processing RSS/Atom feeds (primarily GitHub Atom)
+that uses an LLM to separate "noise" (dev tags, RC releases, minor bumps) from "important" updates
+(major releases, breaking changes, critical security patches) and notifies users only about what matters.
 
-## 2. Модель работы: Pull + пайплайн
+## 2. Operational Model: Pull + Pipeline
 
-Система построена на **pull-модели**: планировщик по интервалу каждого фида инициирует задачу опроса.
-Для сглаживания пиковой нагрузки и уважения rate limits применяется **jitter**.
+The system is built on a **pull model**: the scheduler initiates a polling task at each feed's individual interval.
+**Jitter** is applied to smooth peak load and respect source rate limits.
 
-Событие проходит через пайплайн модулей, связанных единой шиной:
+An event passes through a pipeline of modules connected by a shared bus:
 
 ```
 ┌───────────┐   ┌───────────┐   ┌────────┐   ┌──────────────┐
 │ Scheduler │──▶│ Collector │──▶│ Parser │──▶│ Deduplicator │
 └───────────┘   └───────────┘   └────────┘   └──────┬───────┘
-                                                    │ (новое событие)
+                                                    │ (new event)
                                                     ▼
                                               ┌─────────┐
                                               │   Bus   │ (Redis)
@@ -37,44 +37,44 @@
                                          └────────────┘
 
           ┌─────────┐
-          │ Storage │ ◀── сквозной слой (feeds, updates, история важных обновлений, каналы)
+          │ Storage │ ◀── cross-cutting layer (feeds, updates, important update history, channels)
           └─────────┘
 ```
 
-Шаги обработки:
+Processing steps:
 
-1. **Scheduler** — триггерит задачу по интервалу фида (с jitter).
-2. **Collector** — загружает сырые данные (обязательно `If-Modified-Since` / `ETag`).
-3. **Parser** — конвертирует RSS/Atom/JSON в единый внутренний формат.
-4. **Deduplicator** — отбрасывает уже известные обновления по fingerprint.
-5. **Bus** — переносит событие по пайплайну; обогащение передаётся через `context.Context`.
-6. **Orchestrator** — управляет потоком, гарантируя прохождение события через нужные модули.
-7. **Classificator (LLM)** — анализирует обновление + контекст **двух последних важных обновлений**.
-8. **Dispatcher** — при вердикте «важно» рассылает уведомления в настроенные каналы.
+1. **Scheduler** — triggers a task at the feed's interval (with jitter).
+2. **Collector** — downloads raw data (mandatory `If-Modified-Since` / `ETag`).
+3. **Parser** — converts RSS/Atom/JSON into a unified internal format.
+4. **Deduplicator** — discards already-known updates by fingerprint.
+5. **Bus** — carries the event through the pipeline; enrichment is passed via `context.Context`.
+6. **Orchestrator** — manages the flow, guaranteeing that the event passes through the required modules.
+7. **Classificator (LLM)** — analyzes the update + the context of the **two most recent important updates**.
+8. **Dispatcher** — when the verdict is "important", sends notifications to the configured channels.
 
-## 3. Структура репозитория
+## 3. Repository Structure
 
 ```
-cmd/gruh/            # Точка входа (urfave/cli v3, одна рут-команда, см. §7)
-deploy/              # Helm-чарты
+cmd/gruh/            # Entry point (urfave/cli v3, single root command, see §7)
+deploy/              # Helm charts
 docs/
-├── design/          # Дизайн-документы (этот каталог)
-└── features/        # Описания фич
+├── design/          # Design documents (this directory)
+└── features/        # Feature descriptions
 internal/
-├── bus/             # Единая шина событий (Redis)
-├── classificator/   # LLM-логика принятия решений
-├── collector/       # HTTP-загрузка и rate limiting
-├── config/          # Загрузка и валидация конфигурации (YAML + env, koanf)
-├── deduplicator/    # Fingerprinting и проверка уникальности
-├── dispatcher/      # Доставка уведомлений (Slack, Telegram, Webhook)
-├── llm/             # OpenAI-совместимый клиент
-├── model/           # Общие типы данных (UpdateEvent), без зависимостей
-├── observability/   # Логирование (slog), метрики (Prometheus), LLM-телеметрия (Langfuse + OTEL)
-├── orchestrator/    # Оркестрация процесса классификации
-├── parser/          # Парсинг RSS/Atom/JSON (gofeed)
-├── prompt/          # Управление промптами (.md + Go templates, go:embed)
-├── scheduler/       # Планирование задач с jitter
-└── storage/         # Слой репозиториев (GORM: PostgreSQL/SQLite)
+├── bus/             # Unified event bus (Redis)
+├── classificator/   # LLM-based decision logic
+├── collector/       # HTTP fetching and rate limiting
+├── config/          # Configuration loading and validation (YAML + env, koanf)
+├── deduplicator/    # Fingerprinting and uniqueness checking
+├── dispatcher/      # Notification delivery (Slack, Telegram, Webhook)
+├── llm/             # OpenAI-compatible client
+├── model/           # Shared data types (UpdateEvent), no dependencies
+├── observability/   # Logging (slog), metrics (Prometheus), LLM telemetry (Langfuse + OTEL)
+├── orchestrator/    # Orchestration of the classification process
+├── parser/          # RSS/Atom/JSON parsing (gofeed)
+├── prompt/          # Prompt management (.md + Go templates, go:embed)
+├── scheduler/       # Task scheduling with jitter
+└── storage/         # Repository layer (GORM: PostgreSQL/SQLite)
 Dockerfile
 config.example.yaml
 Makefile
@@ -82,11 +82,11 @@ README.md
 skaffold.yaml
 ```
 
-## 4. Модель данных
+## 4. Data Model
 
-Ядро системы — событие `UpdateEvent` (определено в пакете `internal/model` — принятое
-решение, см. [03-parser.md](modules/03-parser.md) §9), обогащаемое по мере прохождения
-пайплайна через `context.Context`:
+The core of the system is the `UpdateEvent` (defined in the `internal/model` package — an accepted
+decision, see [03-parser.md](modules/03-parser.md) §9), enriched as it moves through the pipeline
+via `context.Context`:
 
 ```go
 type UpdateEvent struct {
@@ -94,74 +94,75 @@ type UpdateEvent struct {
 	RawContent  string
 	PublishedAt time.Time
 	Fingerprint string
-} // Обогащение добавляется в context.Context по мере движения через шину.
+} // Enrichment is added to context.Context as the event moves through the bus.
 ```
 
-### Маппинг фидов на каналы уведомлений
+### Feed-to-Notification-Channel Mapping
 
-Вместо пользовательских конфигов используется прямой маппинг:
+Instead of per-user configs, a direct mapping is used:
 
 ```
-Feed URL -> список каналов уведомлений
+Feed URL -> list of notification channels
 {"https://github.com/user/repo/releases.atom": ["slack_channel_1", "webhook_url_x"]}
 ```
 
-**Источник истины (принятое решение):** фиды, каналы и их маппинг хранятся в **БД**
-(пока управление — напрямую в БД: seed/SQL-скрипты; отдельным шагом будут разработаны
-управляющие транспорты — Slack/Telegram-бот, см. роадмап, фаза 7), а интервалы опроса
-и технические параметры — в **конфиге**. См. [13-config.md](modules/13-config.md).
+**Source of truth (accepted decision):** feeds, channels, and their mapping are stored in the **DB**
+(currently managed directly in the DB via seed/SQL scripts; management transports — a Slack/Telegram bot —
+will be developed as a separate step, see the roadmap, phase 7), while polling intervals
+and technical parameters live in the **config**. See [13-config.md](modules/13-config.md).
 
-## 5. Технологический стек
+## 5. Technology Stack
 
-| Область | Решение |
+| Area | Solution |
 |---------|---------|
-| Язык | Go 1.26 |
+| Language | Go 1.26 |
 | CLI | `urfave/cli/v3` |
-| БД/ORM | GORM (PostgreSQL — прод, SQLite — локально/тесты) |
-| Конфигурация | `koanf/v2` (YAML + env, приоритет env > file > defaults) |
-| Парсинг | `gofeed` |
-| LLM | OpenAI-совместимый API-клиент |
-| Брокер | Redis (распределённая обработка, масштабирование в k8s) |
-| Логирование | `log/slog` (структурные логи, text/JSON) |
-| Метрики | Prometheus (`prometheus/client_golang`, endpoint `/metrics`) |
-| LLM-телеметрия | Langfuse + OpenTelemetry (OTLP, GenAI semantic conventions) |
+| DB/ORM | GORM (PostgreSQL — production, SQLite — local/tests) |
+| Configuration | `koanf/v2` (YAML + env, priority env > file > defaults) |
+| Parsing | `gofeed` |
+| LLM | OpenAI-compatible API client |
+| Broker | Redis (distributed processing, scaling in k8s) |
+| Logging | `log/slog` (structured logs, text/JSON) |
+| Metrics | Prometheus (`prometheus/client_golang`, endpoint `/metrics`) |
+| LLM telemetry | Langfuse + OpenTelemetry (OTLP, GenAI semantic conventions) |
 | CI | GitHub Actions (`.github/workflows`) |
-| Деплой | Kubernetes + HPA, Helm, Skaffold |
-| Локальная разработка | docker-compose (PostgreSQL, Redis) |
+| Deployment | Kubernetes + HPA, Helm, Skaffold |
+| Local development | docker-compose (PostgreSQL, Redis) |
 
-## 6. Ключевые сквозные решения и ограничения
+## 6. Key Cross-Cutting Decisions and Constraints
 
-* **LLM-контекст:** classificator получает текущее обновление **и данные двух последних важных
-  обновлений** этого фида для сравнения изменений. Историю важных обновлений хранит `storage`.
-* **Промпты:** управляются через `.md`-файлы с Go-шаблонами. Файлы в пользовательской директории
-  переопределяют встроенные (`go:embed`).
-* **GitHub:** оптимизация через `ETag` / `Last-Modified` — обязательна.
-* **Масштабируемость:** Redis-шина позволяет отделить `collector` от `classificator` и масштабировать
-  компоненты независимо (несколько подов в k8s с HPA).
-* **Идемпотентность:** дедупликация по fingerprint гарантирует, что одно обновление не будет
-  классифицировано и разослано дважды даже при повторной доставке из шины.
-* **Наблюдаемость:** структурные логи (`log/slog`) с контекстом события, метрики Prometheus
-  по всем модулям пайплайна, телеметрия LLM-вызовов через Langfuse + OTEL
-  (промпты, токены, вердикты). См. [12-observability.md](modules/12-observability.md).
-* **Конфигурация:** YAML + env (приоритет env), секреты только через env, fail-fast
-  валидация на старте. Фиды/каналы — в БД, интервалы/технические параметры — в конфиге.
-  См. [13-config.md](modules/13-config.md).
+* **LLM context:** the classificator receives the current update **and the data from the two most recent
+  important updates** of that feed in order to assess the scope of changes by comparison. The important
+  update history is stored by `storage`.
+* **Prompts:** managed via `.md` files with Go templates. Files in the user directory override
+  the built-in ones (`go:embed`).
+* **GitHub:** optimization via `ETag` / `Last-Modified` is mandatory.
+* **Scalability:** the Redis bus allows decoupling `collector` from `classificator` and scaling
+  components independently (multiple pods in k8s with HPA).
+* **Idempotency:** deduplication by fingerprint guarantees that a single update will not be
+  classified and dispatched twice, even with repeated delivery from the bus.
+* **Observability:** structured logs (`log/slog`) with event context, Prometheus metrics across all
+  pipeline modules, LLM call telemetry via Langfuse + OTEL
+  (prompts, tokens, verdicts). See [12-observability.md](modules/12-observability.md).
+* **Configuration:** YAML + env (env has priority), secrets via env only, fail-fast
+  validation on startup. Feeds/channels — in the DB, intervals/technical parameters — in the config.
+  See [13-config.md](modules/13-config.md).
 
-## 7. Режимы запуска и CLI (принятое решение)
+## 7. Run Modes and CLI (accepted decision)
 
-* **Монолит** — все модули в одном процессе, шина in-memory (или Redis) — для простых инсталляций и локальной разработки.
-* **Распределённый** — роли `collector` / `worker (classificator)` / `dispatcher` в отдельных подах, обмен через Redis.
+* **Monolith** — all modules in a single process, in-memory bus (or Redis) — for simple installations and local development.
+* **Distributed** — `collector` / `worker (classificator)` / `dispatcher` roles in separate pods, communicating via Redis.
 
-Целевая среда — **Kubernetes**: ручное выполнение команд — лишний оверхед, поэтому
-приложение спроектировано как **zero-touch** — под просто запускается и работает
-(миграции, инициализация — автоматически на старте). Дизайн CLI (`cmd/gruh`,
-`urfave/cli/v3`) — **минималистичный**:
+The target environment is **Kubernetes**: manual command execution is unnecessary overhead, so
+the application is designed as **zero-touch** — the pod simply starts and runs
+(migrations, initialization — automatically on startup). The CLI design (`cmd/gruh`,
+`urfave/cli/v3`) is **minimalist**:
 
-* **Одна рут-команда** `gruh` — запускает весь пайплайн (монолит); отдельных команд
-  `serve` / `migrate` / `version` нет: версия — флаг `--version` (встроен в `urfave/cli`),
-  миграции выполняются автоматически при старте (fail fast при ошибке).
-* **Флаги рут-команды:** `--config <path>` (путь к YAML, env `GRUH_CONFIG`), `--version`,
-  `--check-config` (валидация конфига без запуска сервиса, см. [13-config.md](modules/13-config.md) §6).
-* **Сабкоманды зарезервированы только под роли микросервисов** (фаза 5, распределённый режим):
-  `gruh collector`, `gruh worker`, `gruh dispatcher` — запуск процесса в соответствующей роли;
-  рут-команда без сабкоманды остаётся монолитом. Другие сабкоманды не вводятся.
+* **Single root command** `gruh` — starts the full pipeline (monolith); there are no separate
+  `serve` / `migrate` / `version` commands: version is a `--version` flag (built into `urfave/cli`),
+  migrations run automatically on startup (fail fast on error).
+* **Root command flags:** `--config <path>` (path to YAML, env `GRUH_CONFIG`), `--version`,
+  `--check-config` (validate config without starting the service, see [13-config.md](modules/13-config.md) §6).
+* **Subcommands are reserved only for microservice roles** (phase 5, distributed mode):
+  `gruh collector`, `gruh worker`, `gruh dispatcher` — start the process in the corresponding role;
+  the root command without a subcommand remains the monolith. No other subcommands are introduced.

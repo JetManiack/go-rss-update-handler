@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// MemoryBus — in-memory реализация шины на каналах.
+// MemoryBus is an in-memory, channel-based bus implementation.
 type MemoryBus struct {
 	mu          sync.RWMutex
 	subscribers map[string][]Handler

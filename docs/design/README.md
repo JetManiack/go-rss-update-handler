@@ -1,16 +1,16 @@
-# GRUH — Дизайн-документация
+# GRUH — Design Documentation
 
-Иерархия дизайн-документов проекта **GRUH (Go RSS Update Handler)** — AI-powered системы обработки RSS/Atom-фидов.
-Верхнеуровневое описание архитектуры — в [00-overview.md](00-overview.md).
+Hierarchy of design documents for the **GRUH (Go RSS Update Handler)** project — an AI-powered RSS/Atom feed processing system.
+A high-level architectural description is in [00-overview.md](00-overview.md).
 
-## Структура документации
+## Documentation Structure
 
 ```
 docs/design/
-├── README.md          # Этот файл — индекс документации
-├── 00-overview.md     # Общий архитектурный обзор, потоки данных, сквозные решения
-├── ROADMAP.md         # Роадмап разработки по фазам
-└── modules/           # Дизайн-документы по каждому модулю internal/
+├── README.md          # This file — documentation index
+├── 00-overview.md     # General architectural overview, data flows, cross-cutting decisions
+├── ROADMAP.md         # Development roadmap by phases
+└── modules/           # Design documents for each internal/ module
     ├── 01-scheduler.md
     ├── 02-collector.md
     ├── 03-parser.md
@@ -26,52 +26,52 @@ docs/design/
     └── 13-config.md
 ```
 
-Нумерация модулей соответствует порядку прохождения события по пайплайну
-(scheduler → collector → parser → deduplicator → bus → orchestrator → classificator/llm/prompt → dispatcher),
-модули `storage`, `observability` и `config` — сквозные и описаны последними.
+Module numbering corresponds to the order in which an event passes through the pipeline
+(scheduler → collector → parser → deduplicator → bus → orchestrator → classificator/llm/prompt → dispatcher);
+the `storage`, `observability`, and `config` modules are cross-cutting and are described last.
 
-## Документы
+## Documents
 
-| № | Документ | Модуль | Назначение |
+| # | Document | Module | Purpose |
 |---|----------|--------|------------|
-| — | [00-overview.md](00-overview.md) | — | Общая архитектура, пайплайн, модель данных, стек |
-| 1 | [01-scheduler.md](modules/01-scheduler.md) | `internal/scheduler` | Планирование задач опроса фидов с jitter |
-| 2 | [02-collector.md](modules/02-collector.md) | `internal/collector` | HTTP-загрузка фидов, rate limiting, ETag |
-| 3 | [03-parser.md](modules/03-parser.md) | `internal/parser` | Парсинг RSS/Atom/JSON в единый формат |
-| 4 | [04-deduplicator.md](modules/04-deduplicator.md) | `internal/deduplicator` | Fingerprinting и проверка уникальности |
-| 5 | [05-bus.md](modules/05-bus.md) | `internal/bus` | Единая шина событий (Redis) |
-| 6 | [06-orchestrator.md](modules/06-orchestrator.md) | `internal/orchestrator` | Управление потоком обработки события |
-| 7 | [07-classificator.md](modules/07-classificator.md) | `internal/classificator` | LLM-классификация важности обновления |
-| 8 | [08-llm.md](modules/08-llm.md) | `internal/llm` | OpenAI-совместимый клиент |
-| 9 | [09-prompt.md](modules/09-prompt.md) | `internal/prompt` | Управление промптами (.md + Go templates) |
-| 10 | [10-dispatcher.md](modules/10-dispatcher.md) | `internal/dispatcher` | Доставка уведомлений (Slack, Telegram, Webhook) |
-| 11 | [11-storage.md](modules/11-storage.md) | `internal/storage` | Слой репозиториев (GORM: PostgreSQL/SQLite) |
-| 12 | [12-observability.md](modules/12-observability.md) | `internal/observability` | Логирование (slog), метрики (Prometheus), LLM-телеметрия (Langfuse + OTEL) |
-| 13 | [13-config.md](modules/13-config.md) | `internal/config` | Загрузка и валидация конфигурации (YAML + env) |
-| — | [ROADMAP.md](ROADMAP.md) | — | Фазы разработки и порядок реализации |
+| — | [00-overview.md](00-overview.md) | — | Overall architecture, pipeline, data model, stack |
+| 1 | [01-scheduler.md](modules/01-scheduler.md) | `internal/scheduler` | Feed polling task scheduling with jitter |
+| 2 | [02-collector.md](modules/02-collector.md) | `internal/collector` | HTTP feed fetching, rate limiting, ETag |
+| 3 | [03-parser.md](modules/03-parser.md) | `internal/parser` | Parsing RSS/Atom/JSON into a unified format |
+| 4 | [04-deduplicator.md](modules/04-deduplicator.md) | `internal/deduplicator` | Fingerprinting and uniqueness checking |
+| 5 | [05-bus.md](modules/05-bus.md) | `internal/bus` | Unified event bus (Redis) |
+| 6 | [06-orchestrator.md](modules/06-orchestrator.md) | `internal/orchestrator` | Event processing flow management |
+| 7 | [07-classificator.md](modules/07-classificator.md) | `internal/classificator` | LLM-based update importance classification |
+| 8 | [08-llm.md](modules/08-llm.md) | `internal/llm` | OpenAI-compatible client |
+| 9 | [09-prompt.md](modules/09-prompt.md) | `internal/prompt` | Prompt management (.md + Go templates) |
+| 10 | [10-dispatcher.md](modules/10-dispatcher.md) | `internal/dispatcher` | Notification delivery (Slack, Telegram, Webhook) |
+| 11 | [11-storage.md](modules/11-storage.md) | `internal/storage` | Repository layer (GORM: PostgreSQL/SQLite) |
+| 12 | [12-observability.md](modules/12-observability.md) | `internal/observability` | Logging (slog), metrics (Prometheus), LLM telemetry (Langfuse + OTEL) |
+| 13 | [13-config.md](modules/13-config.md) | `internal/config` | Configuration loading and validation (YAML + env) |
+| — | [ROADMAP.md](ROADMAP.md) | — | Development phases and implementation order |
 
-## Процесс разработки
+## Development Process
 
-Проект разрабатывается по следующим правилам (обязательны для всех фаз и модулей):
+The project is developed according to the following rules (mandatory for all phases and modules):
 
-* **TDD (Test-Driven Development)** — сначала пишется падающий тест, затем минимальная
-  реализация, затем рефакторинг (цикл red → green → refactor). Код без тестов не мерджится.
-* **GitFlow (feature branches)** — на каждую фичу создаётся отдельная ветка
-  (`feature/<краткое-имя>`); после прохождения всех тестов и ревью ветка мерджится в `main`.
-  Ветка `main` всегда остаётся в рабочем (зелёном) состоянии.
+* **TDD (Test-Driven Development)** — a failing test is written first, then a minimal
+  implementation, then refactoring (red → green → refactor cycle). Code without tests is not merged.
+* **GitFlow (feature branches)** — a separate branch is created for each feature
+  (`feature/<short-name>`); after all tests pass and the review is complete, the branch is merged into `main`.
+  The `main` branch always remains in a working (green) state.
 
-Подробнее см. раздел «Процесс разработки» в [ROADMAP.md](ROADMAP.md).
+For more details, see the "Development Process" section in [ROADMAP.md](ROADMAP.md).
 
-## Соглашения по документам
+## Document Conventions
 
-Каждый дизайн-документ модуля следует единому шаблону:
+Each module design document follows a uniform template:
 
-1. **Назначение** — зачем модуль нужен и его место в пайплайне.
-2. **Ответственность и границы** — что модуль делает и что явно НЕ делает.
-3. **Публичный интерфейс** — предполагаемые Go-интерфейсы и типы.
-4. **Внутреннее устройство** — ключевые решения и алгоритмы.
-5. **Зависимости** — от каких модулей/библиотек зависит.
-6. **Конфигурация** — параметры из `config.yaml`.
-7. **Обработка ошибок и крайние случаи**.
-8. **Тестирование** — стратегия тестирования модуля.
-9. **Открытые вопросы** — что требует уточнения перед реализацией.
+1. **Purpose** — why the module is needed and its place in the pipeline.
+2. **Responsibilities and Boundaries** — what the module does and what it explicitly does NOT do.
+3. **Public Interface** — expected Go interfaces and types.
+4. **Internal Design** — key decisions and algorithms.
+5. **Dependencies** — which modules/libraries it depends on.
+6. **Configuration** — parameters from `config.yaml`.
+7. **Error Handling and Edge Cases**.
+8. **Testing** — the module's testing strategy.
+9. **Open Questions** — what needs clarification before implementation.

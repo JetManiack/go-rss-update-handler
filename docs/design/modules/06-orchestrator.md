@@ -1,29 +1,29 @@
 # 06. Orchestrator (`internal/orchestrator`)
 
-## 1. Назначение
+## 1. Purpose
 
-Управляет потоком обработки события: связывает стадии пайплайна в правильном порядке,
-гарантирует, что событие пройдёт через все необходимые модули, и обеспечивает
-персистентность промежуточных состояний. Единственный модуль, который «знает» весь пайплайн.
+Manages the event processing flow: connects pipeline stages in the correct order,
+guarantees that the event passes through all required modules, and ensures
+persistence of intermediate states. The only module that "knows" the full pipeline.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Определяет цепочку обработки: fetch → parse → dedup → publish; consume → classify → store → dispatch.
-* Подписывается на топики шины и вызывает нужные модули.
-* Обогащает `context.Context` метаданными (feed_id, trace_id) по мере движения события.
-* Собирает контекст для classificator'а: запрашивает у `storage` два последних важных обновления фида.
-* Обеспечивает продолжение обработки после сбоя: статус события **выводится из фактов**
-  в `storage` (`classified_at`, записи в `dispatches`), отдельная машина состояний не ведётся (см. §9).
+**Does:**
+* Defines the processing chain: fetch → parse → dedup → publish; consume → classify → store → dispatch.
+* Subscribes to bus topics and calls the appropriate modules.
+* Enriches `context.Context` with metadata (feed_id, trace_id) as the event moves.
+* Assembles context for the classificator: queries `storage` for the two most recent important updates of the feed.
+* Ensures processing can resume after a failure: event status is **derived from facts**
+  in `storage` (`classified_at`, records in `dispatches`); no separate state machine is maintained (see §9).
 
-**НЕ делает:**
-* Не содержит доменной логики модулей (fetch/parse/classify/notify) — только связывание.
-* Не реализует транспорт (это `bus`).
+**Does NOT:**
+* Does not contain domain logic of the modules (fetch/parse/classify/notify) — only wiring.
+* Does not implement transport (that is `bus`).
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
-type Orchestrator struct { /* зависимости через конструктор */ }
+type Orchestrator struct { /* dependencies via constructor */ }
 
 func New(deps Deps) *Orchestrator
 
@@ -37,75 +37,75 @@ type Deps struct {
 	Store        storage.Store
 }
 
-// HandleFetchTask — обработчик задач планировщика (роль collector).
+// HandleFetchTask — handler for scheduler tasks (collector role).
 func (o *Orchestrator) HandleFetchTask(ctx context.Context, task scheduler.FetchTask) error
 
-// RunWorkers — подписки на топики шины (роли worker/dispatcher); блокируется до отмены ctx.
+// RunWorkers — subscriptions to bus topics (worker/dispatcher roles); blocks until ctx is cancelled.
 func (o *Orchestrator) RunWorkers(ctx context.Context) error
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-### Поток «сбор» (роль collector)
-1. `Collector.Fetch` → при `NotModified` завершить.
-2. `Parser.Parse` → события.
-3. `Dedup.Filter` → только новые.
-4. `Store.SaveUpdates` + `Bus.Publish("updates.new")` для каждого.
+### "Collection" flow (collector role)
+1. `Collector.Fetch` → on `NotModified` finish.
+2. `Parser.Parse` → events.
+3. `Dedup.Filter` → new events only.
+4. `Store.SaveUpdates` + `Bus.Publish("updates.new")` for each.
 
-### Поток «классификация» (роль worker)
-1. Подписка на `updates.new`.
-2. `Store.LastImportant(feedID, 2)` → контекст для LLM.
-3. `Classifier.Classify(event, history)` → вердикт.
-4. `Store.SaveVerdict`; если important → `Bus.Publish("updates.important")`.
+### "Classification" flow (worker role)
+1. Subscribe to `updates.new`.
+2. `Store.LastImportant(feedID, 2)` → context for LLM.
+3. `Classifier.Classify(event, history)` → verdict.
+4. `Store.SaveVerdict`; if important → `Bus.Publish("updates.important")`.
 
-### Поток «доставка» (роль dispatcher)
-1. Подписка на `updates.important`.
-2. Резолв каналов по маппингу фида, `Dispatcher.Send`.
-3. `Store.MarkDispatched` (идемпотентность повторных доставок).
+### "Delivery" flow (dispatcher role)
+1. Subscribe to `updates.important`.
+2. Resolve channels by the feed mapping, `Dispatcher.Send`.
+3. `Store.MarkDispatched` (idempotency for repeated deliveries).
 
-Роли включаются флагами CLI: монолит запускает все три, распределённый режим — по одной на процесс.
+Roles are enabled via CLI flags: monolith runs all three, distributed mode runs one per process.
 
-## 5. Зависимости
+## 5. Dependencies
 
-Все модули пайплайна (см. `Deps`) — только через интерфейсы; orchestrator не импортирует реализации.
+All pipeline modules (see `Deps`) — via interfaces only; orchestrator does not import implementations.
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 orchestrator:
-  roles: [collector, worker, dispatcher]  # какие роли активны в этом процессе
+  roles: [collector, worker, dispatcher]  # which roles are active in this process
   worker_concurrency: 4
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Ошибка стадии → nack в шину (повторная доставка); факты в `storage` (вердикт, отметки
-  доставки) позволяют продолжить с места сбоя без повторной классификации.
-* Недоступность LLM или БД — **fail fast**: ошибка наверх и падение процесса без
-  сохранения состояния классификации (см. [08-llm.md](08-llm.md) §9, [11-storage.md](11-storage.md) §9);
-  после рестарта событие обрабатывается заново (идемпотентность за счёт fingerprint и `dispatches`).
-* Повторная доставка уже классифицированного события — вердикт берётся из `storage`, LLM не вызывается.
-* Повторная отправка уведомления — блокируется флагом `dispatched` в `storage`.
-* Частичный сбой доставки (1 из N каналов) — ретраится только упавший канал.
+* Stage error → nack to the bus (redelivery); facts in `storage` (verdict, dispatch records)
+  allow resuming from the point of failure without re-classifying.
+* LLM or DB unavailable — **fail fast**: error propagated up and process crash without
+  saving classification state (see [08-llm.md](08-llm.md) §9, [11-storage.md](11-storage.md) §9);
+  after restart the event is reprocessed (idempotency via fingerprint and `dispatches`).
+* Redelivery of an already-classified event — verdict is taken from `storage`, LLM is not called.
+* Repeated notification sending — blocked by the `dispatched` flag in `storage`.
+* Partial delivery failure (1 of N channels) — only the failed channel is retried.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit с моками всех `Deps`: порядок вызовов, обработка ошибок каждой стадии, идемпотентность.
-* Интеграционный end-to-end: httptest-фид + SQLite + memory-bus + фейковый LLM → уведомление в фейковый канал.
+* Unit with mocks of all `Deps`: call order, error handling at each stage, idempotency.
+* Integration end-to-end: httptest feed + SQLite + memory bus + fake LLM → notification to a fake channel.
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Машина состояний — решено (вариант Б, вывод из фактов)**: явной таблицы/колонки
-  `status` нет; статус события вычисляется из уже имеющихся данных —
-  `classified_at IS NOT NULL` → классифицировано, запись в `dispatches` → доставлено.
-  Единственный источник истины, нечему рассинхронизироваться, идемпотентность «бесплатно».
-  Для наглядности при отладке можно добавить SQL-view. Явную машину состояний вводить
-  только при появлении сложных переходов (отложенная классификация, ручная модерация).
-* Нужна ли сага-компенсация при сбое доставки после записи вердикта (или достаточно retry)?
-  Контекст: «сага» означала бы откат/компенсацию уже выполненных шагов (например, стереть
-  вердикт, если доставка окончательно не удалась). Компенсировать здесь нечего — вердикт
-  корректен независимо от судьбы доставки, а повторная отправка защищена идемпотентностью
-  `dispatches`. Рекомендация: **саги не нужны** — достаточно retry per-channel
-  (см. [10-dispatcher.md](10-dispatcher.md) §4) + идемпотентность; финальный сбой доставки
-  фиксируется в логе/метрике и виден по отсутствию записи в `dispatches`.
-  Ждёт подтверждения (фаза 4).
+* **State machine — resolved (option B, derive from facts)**: no explicit `status`
+  table/column; event status is derived from existing data —
+  `classified_at IS NOT NULL` → classified, record in `dispatches` → dispatched.
+  Single source of truth, nothing to get out of sync, idempotency for free.
+  A SQL view can be added for debugging visibility. Introduce an explicit state machine
+  only if complex transitions appear (deferred classification, manual moderation).
+* Does saga compensation need to happen on delivery failure after the verdict is recorded (or is retry sufficient)?
+  Context: "saga" would mean rolling back/compensating already-completed steps (e.g., deleting
+  the verdict if delivery ultimately fails). There is nothing to compensate here — the verdict
+  is correct regardless of delivery outcome, and repeated sending is protected by `dispatches`
+  idempotency. Recommendation: **sagas are not needed** — per-channel retry is sufficient
+  (see [10-dispatcher.md](10-dispatcher.md) §4) + idempotency; a final delivery failure
+  is recorded in the log/metric and is visible by the absence of a record in `dispatches`.
+  Awaiting confirmation (phase 4).

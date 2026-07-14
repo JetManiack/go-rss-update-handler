@@ -1,31 +1,31 @@
 # 01. Scheduler (`internal/scheduler`)
 
-## 1. Назначение
+## 1. Purpose
 
-Планировщик — входная точка pull-модели. По индивидуальному интервалу каждого фида
-генерирует задачи опроса и передаёт их коллектору. Применяет **jitter**, чтобы избежать
-пиков нагрузки (когда все фиды опрашиваются одновременно) и не нарушать rate limits источников.
+The scheduler is the entry point of the pull model. It generates polling tasks for each feed
+at that feed's individual interval and passes them to the collector. It applies **jitter** to
+avoid load spikes (when all feeds are polled simultaneously) and to respect source rate limits.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Хранит расписание опроса по каждому фиду: список фидов — из БД (источник истины),
-  интервалы — из конфига (глобальный `default_interval`), см. [13-config.md](13-config.md).
-* Добавляет случайный jitter к моменту запуска задачи.
-* Публикует задачу `FetchTask{FeedID, URL}` для коллектора.
-* **Adaptive polling (принято):** учитывает результат прошлого опроса — при повторных 304/ошибках
-  интервал фида плавно увеличивается (до `max_backoff × default_interval`), при новом
-  контенте — сбрасывается к базовому. Состояние backoff — в памяти процесса (не в БД).
+**Does:**
+* Maintains the polling schedule for each feed: the feed list comes from the DB (source of truth),
+  intervals come from the config (global `default_interval`), see [13-config.md](13-config.md).
+* Adds random jitter to the task start time.
+* Publishes a `FetchTask{FeedID, URL}` for the collector.
+* **Adaptive polling (accepted):** takes into account the result of the previous poll — on repeated 304s/errors
+  the feed's interval gradually increases (up to `max_backoff × default_interval`); on new
+  content it resets to the base. Backoff state is kept in process memory (not in the DB).
 
-**НЕ делает:**
-* Не выполняет HTTP-запросы (это `collector`).
-* Не знает о содержимом фидов и их важности.
+**Does NOT:**
+* Does not make HTTP requests (that is `collector`).
+* Does not know about feed content or its importance.
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Scheduler interface {
-	// Run блокируется до отмены ctx; на каждый тик фида вызывает handler.
+	// Run blocks until ctx is cancelled; calls handler on each feed tick.
 	Run(ctx context.Context) error
 }
 
@@ -39,50 +39,50 @@ type TaskHandler func(ctx context.Context, task FetchTask) error
 func New(feeds FeedSource, handler TaskHandler, opts ...Option) Scheduler
 ```
 
-`FeedSource` — абстракция над `storage` для получения актуального списка фидов и их интервалов.
+`FeedSource` — an abstraction over `storage` for obtaining the current feed list and their intervals.
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-* На каждый фид — собственный таймер (`time.Timer`), пересоздаваемый после каждого срабатывания:
+* Each feed has its own timer (`time.Timer`), recreated after every firing:
   `nextRun = interval + rand(-jitter, +jitter)`.
-* Список фидов периодически перечитывается из `FeedSource` (hot reload при добавлении/удалении фидов).
-* Ограничение параллелизма: worker pool / семафор на количество одновременных задач.
-* В распределённом режиме (несколько реплик) — распределённая блокировка на фид
-  (Redis `SETNX` c TTL), чтобы фид не опрашивался дважды.
+* The feed list is periodically re-read from `FeedSource` (hot reload when feeds are added/removed).
+* Parallelism limit: worker pool / semaphore on the number of concurrent tasks.
+* In distributed mode (multiple replicas) — distributed lock per feed
+  (Redis `SETNX` with TTL) so that a feed is not polled twice.
 
-## 5. Зависимости
+## 5. Dependencies
 
-* `internal/storage` (через интерфейс `FeedSource`).
-* Redis (только в режиме нескольких реплик, через `internal/bus` либо отдельный lock-клиент).
+* `internal/storage` (via the `FeedSource` interface).
+* Redis (only in multi-replica mode, via `internal/bus` or a separate lock client).
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 scheduler:
-  default_interval: 15m   # базовый интервал опроса (интервалы — только в конфиге, не в БД)
-  jitter: 20%             # доля интервала, добавляемая случайно
-  max_concurrent: 10      # одновременных задач опроса
-  reload_interval: 1m     # период перечитывания списка фидов из БД
+  default_interval: 15m   # base polling interval (intervals are in config only, not in DB)
+  jitter: 20%             # fraction of the interval added randomly
+  max_concurrent: 10      # concurrent polling tasks
+  reload_interval: 1m     # period for re-reading the feed list from the DB
   adaptive:
-    enabled: true         # adaptive polling (принятое решение)
-    max_backoff: 8        # макс. множитель к default_interval для «тихих» фидов
+    enabled: true         # adaptive polling (accepted decision)
+    max_backoff: 8        # max multiplier to default_interval for "quiet" feeds
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Ошибка обработчика задачи не останавливает планировщик — фид перепланируется на следующий интервал.
-* Долгий опрос: новый тик фида не стартует, пока не завершён предыдущий (skip, не queue).
-* Пустой список фидов — планировщик работает вхолостую и ждёт reload.
-* Остановка: отмена `ctx` завершает все таймеры и дожидается активных задач (graceful shutdown).
+* A task handler error does not stop the scheduler — the feed is rescheduled for the next interval.
+* Long poll: a new tick for a feed does not start until the previous one is complete (skip, not queue).
+* Empty feed list — the scheduler idles and waits for a reload.
+* Shutdown: cancelling `ctx` stops all timers and waits for active tasks (graceful shutdown).
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit: детерминированный jitter через инъекцию `rand.Source`; фейковые часы (интерфейс `Clock`).
-* Проверка: соблюдение интервалов, отсутствие параллельного опроса одного фида, graceful shutdown.
+* Unit: deterministic jitter via `rand.Source` injection; fake clock (a `Clock` interface).
+* Verification: interval compliance, absence of concurrent polling of the same feed, graceful shutdown.
 
-## 9. Принятые решения (бывшие открытые вопросы)
+## 9. Accepted Decisions (formerly open questions)
 
-* **Adaptive polling — да**: backoff на неактивных фидах входит в дизайн (см. §2/§6);
-  реализуется в фазе 2 вместе с планировщиком.
-* **Источник истины**: список фидов — БД; интервалы — только конфиг (глобальные значения,
-  per-feed интервалов в БД нет). См. [13-config.md](13-config.md).
+* **Adaptive polling — yes**: backoff on inactive feeds is part of the design (see §2/§6);
+  implemented in phase 2 together with the scheduler.
+* **Source of truth**: feed list — DB; intervals — config only (global values,
+  no per-feed intervals in the DB). See [13-config.md](13-config.md).

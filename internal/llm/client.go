@@ -78,15 +78,12 @@ func (c *client) Complete(ctx context.Context, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("llm: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return Response{}, fmt.Errorf("llm: create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-
-	// Re-create request for each attempt to avoid re-reading a consumed body
-	var resp *http.Response
+	// Re-create the request for each attempt to avoid re-sending an
+	// already-consumed request body on retry.
+	var (
+		httpReq *http.Request
+		resp    *http.Response
+	)
 	for i := 0; i <= c.cfg.MaxRetries; i++ {
 		httpReq, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 		if err != nil {
@@ -102,10 +99,12 @@ func (c *client) Complete(ctx context.Context, req Request) (Response, error) {
 			}
 			// Only retry on 429 and 5xx
 			if resp.StatusCode != http.StatusTooManyRequests && (resp.StatusCode < 500 || resp.StatusCode > 599) {
-				defer resp.Body.Close()
+				_ = resp.Body.Close()
 				return Response{}, fmt.Errorf("llm: fatal status: %d", resp.StatusCode)
 			}
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return Response{}, fmt.Errorf("llm: close response body: %w", closeErr)
+			}
 		}
 
 		if i < c.cfg.MaxRetries {

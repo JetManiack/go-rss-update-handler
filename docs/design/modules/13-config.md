@@ -1,33 +1,33 @@
 # 13. Config (`internal/config`)
 
-## 1. Назначение
+## 1. Purpose
 
-Сквозной модуль загрузки, слияния и валидации конфигурации приложения.
-Единственная точка, где читаются файл конфигурации и переменные окружения;
-остальные модули получают уже готовые типизированные структуры через DI
-и ничего не знают об источниках настроек.
+A cross-cutting module for loading, merging, and validating the application configuration.
+The single point where the config file and environment variables are read;
+other modules receive already-prepared typed structs via DI
+and know nothing about the configuration sources.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Загрузка `config.yaml` (путь — флаг `--config` / env `GRUH_CONFIG`, дефолт `./config.yaml`).
-* Наложение переменных окружения поверх файла (см. приоритеты в §4).
-* Дефолты для всех необязательных параметров.
-* Валидация всей конфигурации на старте — fail fast с человекочитаемым списком ошибок.
-* Предоставление типизированных секций (`config.Scheduler`, `config.LLM`, …) модулям.
+**Does:**
+* Loads `config.yaml` (path — `--config` flag / `GRUH_CONFIG` env, default `./config.yaml`).
+* Overlays environment variables on top of the file (see priorities in §4).
+* Defaults for all optional parameters.
+* Validates the entire configuration at startup — fail fast with a human-readable list of errors.
+* Provides typed sections (`config.Scheduler`, `config.LLM`, …) to modules.
 
-**НЕ делает:**
-* Не хранит доменные данные: **фиды, каналы и их маппинг живут в БД** (источник истины —
-  `storage`; пока управление — напрямую в БД: seed/SQL-скрипты, отдельным шагом будут
-  разработаны управляющие транспорты — Slack/Telegram-бот, фаза 7), в конфиге их нет.
-* Не перечитывает конфиг в рантайме (hot-reload нет — изменения применяются перезапуском;
-  исключение — пользовательские промпты, это зона `internal/prompt`).
-* Не читает секреты из файла (см. §4 «Секреты»).
+**Does NOT:**
+* Does not store domain data: **feeds, channels, and their mapping live in the DB** (source of truth —
+  `storage`; currently managed directly in the DB via seed/SQL scripts; management transports —
+  a Slack/Telegram bot — will be developed as a separate step, phase 7); they are not in the config.
+* Does not re-read config at runtime (no hot-reload — changes are applied by restarting;
+  exception — user prompts, that is the `internal/prompt` zone).
+* Does not read secrets from a file (see §4 "Secrets").
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
-// Load читает файл, накладывает env, применяет дефолты и валидирует.
+// Load reads the file, overlays env, applies defaults, and validates.
 func Load(path string) (*Config, error)
 
 type Config struct {
@@ -45,53 +45,53 @@ type Config struct {
 	Observability observability.Config
 }
 
-// Validate возвращает ВСЕ ошибки разом (errors.Join), а не первую попавшуюся.
+// Validate returns ALL errors at once (errors.Join), not just the first one.
 func (c *Config) Validate() error
 ```
 
-Каждый модуль объявляет собственный тип `Config` у себя в пакете; `internal/config`
-только агрегирует их — так конфигурация модуля живёт рядом с его кодом и тестами.
+Each module declares its own `Config` type in its own package; `internal/config`
+only aggregates them — this way the module's configuration lives alongside its code and tests.
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-### Источники и приоритеты (по убыванию)
+### Sources and Priorities (descending)
 
-1. **Переменные окружения** — `GRUH_` + путь ключа через `_` в верхнем регистре:
+1. **Environment variables** — `GRUH_` + key path via `_` in upper case:
    `llm.base_url` → `GRUH_LLM_BASE_URL`.
-2. **Файл** `config.yaml`.
-3. **Дефолты** в коде.
+2. **File** `config.yaml`.
+3. **Defaults** in code.
 
-### Библиотека
+### Library
 
-`github.com/knadh/koanf/v2` (провайдеры `file` + `env`, парсер `yaml`):
-легковесная альтернатива viper без глобального состояния и лишних зависимостей,
-нативно поддерживает слияние источников и unmarshal в структуры.
-Валидация — руками в `Validate()` каждой секции (без тяжёлых validator-библиотек).
+`github.com/knadh/koanf/v2` (providers `file` + `env`, parser `yaml`):
+a lightweight alternative to viper without global state and unnecessary dependencies,
+natively supports source merging and unmarshaling into structs.
+Validation is done manually in `Validate()` of each section (no heavy validator libraries).
 
-### Секреты
+### Secrets
 
-Секреты задаются **только** через env и в файле не хранятся (валидация ругается,
-если секрет встретился в YAML):
+Secrets are set **only** via env and are not stored in the file (validation raises an error
+if a secret appears in YAML):
 
-| Секрет | Переменная |
+| Secret | Variable |
 |--------|------------|
-| DSN базы данных | `GRUH_DB_DSN` |
-| API-ключ LLM | `GRUH_LLM_API_KEY` |
-| Ключи Langfuse | `GRUH_LANGFUSE_PUBLIC_KEY` / `GRUH_LANGFUSE_SECRET_KEY` |
-| Токены каналов (Slack/Telegram) | только env: в `channels.config_json` (БД) хранится лишь **имя** переменной (`token_env`), см. §9 |
+| Database DSN | `GRUH_DB_DSN` |
+| LLM API key | `GRUH_LLM_API_KEY` |
+| Langfuse keys | `GRUH_LANGFUSE_PUBLIC_KEY` / `GRUH_LANGFUSE_SECRET_KEY` |
+| Channel tokens (Slack/Telegram) | env only: in `channels.config_json` (DB) only the **name** of the variable is stored (`token_env`), see §9 |
 
-### Разделение «конфиг vs БД» (принятое решение)
+### "Config vs DB" Separation (accepted decision)
 
-| Данные | Где живут |
+| Data | Lives in |
 |--------|-----------|
-| Фиды (URL, активность) | **БД** (источник истины) |
-| Каналы уведомлений и маппинг feed → каналы | **БД** (источник истины) |
-| Интервалы опроса, jitter, лимиты | **конфиг** (глобальные значения) |
-| Технические параметры модулей (таймауты, ретраи, порты) | **конфиг** |
+| Feeds (URL, active flag) | **DB** (source of truth) |
+| Notification channels and feed → channel mapping | **DB** (source of truth) |
+| Polling intervals, jitter, limits | **config** (global values) |
+| Technical module parameters (timeouts, retries, ports) | **config** |
 
-### Пример `config.example.yaml`
+### Example `config.example.yaml`
 
-Файл в корне репозитория, агрегирует секции всех модулей (см. §6 соответствующих доков):
+File at the repository root, aggregates sections from all modules (see §6 of the respective docs):
 
 ```yaml
 scheduler:
@@ -104,50 +104,50 @@ llm:
   model: qwen3-32b
 observability:
   log: { level: info, format: json }
-# секреты: GRUH_DB_DSN, GRUH_LLM_API_KEY, GRUH_LANGFUSE_*
+# secrets: GRUH_DB_DSN, GRUH_LLM_API_KEY, GRUH_LANGFUSE_*
 ```
 
-## 5. Зависимости
+## 5. Dependencies
 
 * `github.com/knadh/koanf/v2` (+ `file`, `env`, `yaml` providers).
-* Типы `Config` всех модулей `internal/*`.
+* `Config` types of all `internal/*` modules.
 
-## 6. Конфигурация
+## 6. Configuration
 
-Сам модуль настраивается только флагом/переменной с путём к файлу:
-`--config <path>` / `GRUH_CONFIG` (дефолт `./config.yaml`; отсутствие файла — не ошибка,
-если всё необходимое задано через env/дефолты). `--config` — флаг единственной
-рут-команды `gruh` (см. [00-overview.md](../00-overview.md) §7).
+The module itself is configured only by a flag/variable with the file path:
+`--config <path>` / `GRUH_CONFIG` (default `./config.yaml`; a missing file is not an error
+if everything required is provided via env/defaults). `--config` is a flag of the single
+root command `gruh` (see [00-overview.md](../00-overview.md) §7).
 
-Флаг **`--check-config`** (принято, фаза 0): загрузить и провалидировать конфигурацию
-без запуска сервиса: exit code 0 и краткий отчёт при успехе, иначе — список ошибок
-и ненулевой код. Полезно в CI и k8s (init-проверка перед деплоем).
+The **`--check-config`** flag (accepted, phase 0): load and validate the configuration
+without starting the service: exit code 0 and a brief report on success, otherwise — list of
+errors and a non-zero code. Useful in CI and k8s (init check before deploy).
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Любая ошибка загрузки/валидации — **fail fast**: процесс не стартует, все ошибки
-  выводятся списком (`errors.Join`), а не по одной.
-* Неизвестные ключи в YAML — ошибка (защита от опечаток), строгий unmarshal.
-* Секрет в YAML-файле — ошибка валидации с подсказкой «используйте env».
-* Взаимоисключающие комбинации (например, `storage.driver: sqlite` + распределённый режим) —
-  проверяются в `Validate()`.
+* Any load/validation error — **fail fast**: the process does not start, all errors
+  are printed as a list (`errors.Join`), not one by one.
+* Unknown keys in YAML — error (protection against typos), strict unmarshal.
+* Secret in YAML file — validation error with a hint to "use env".
+* Mutually exclusive combinations (e.g., `storage.driver: sqlite` + distributed mode) —
+  checked in `Validate()`.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit: приоритет env > file > default; unmarshal всех секций из `config.example.yaml`
-  (файл-пример всегда валиден — golden-тест).
-* Unit: `Validate()` — по тесту на каждое правило (неизвестный ключ, секрет в файле,
-  недопустимые комбинации).
+* Unit: priority env > file > default; unmarshal of all sections from `config.example.yaml`
+  (the example file is always valid — golden test).
+* Unit: `Validate()` — one test per rule (unknown key, secret in file,
+  invalid combinations).
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Шифрование токенов каналов — снято (секретов в БД нет)**: каналы действительно
-  живут в БД (`channels`), но в `config_json` хранится не сам токен, а **имя
-  env-переменной** (`"token_env": "GRUH_TG_TOKEN"`, см. [10-dispatcher.md](10-dispatcher.md) §6);
-  значение читается из окружения (k8s Secret) при старте. Шифровать в БД нечего —
-  политика «секреты только через env» едина для файла конфига и БД.
-  Пересмотреть, если управляющие транспорты (фаза 7) потребуют добавлять каналы
-  с токенами на лету, без редеплоя env.
-* **Флаг `gruh --check-config` — решено (да, фаза 0)**: валидация конфига без запуска
-  сервиса (см. §6) — валидатор и так в планах, флаг дёшев. Отдельной команды нет —
-  CLI состоит из одной рут-команды (см. [00-overview.md](../00-overview.md) §7).
+* **Channel token encryption — dropped (no secrets in DB)**: channels do indeed
+  live in the DB (`channels`), but `config_json` stores not the token itself but the **name
+  of the env variable** (`"token_env": "GRUH_TG_TOKEN"`, see [10-dispatcher.md](10-dispatcher.md) §6);
+  the value is read from the environment (k8s Secret) at startup. Nothing to encrypt in the DB —
+  the "secrets via env only" policy applies uniformly to both the config file and the DB.
+  Revisit if management transports (phase 7) require adding channels with tokens on the fly,
+  without redeploying env.
+* **`gruh --check-config` flag — resolved (yes, phase 0)**: config validation without starting
+  the service (see §6) — the validator is planned anyway, the flag is cheap. No separate command —
+  the CLI consists of a single root command (see [00-overview.md](../00-overview.md) §7).

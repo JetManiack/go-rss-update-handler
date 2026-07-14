@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -48,5 +50,72 @@ func TestCollector_Fetch(t *testing.T) {
 	}
 	if res.Body != nil {
 		t.Errorf("Expected nil body for 304, got %s", res.Body)
+	}
+}
+
+func TestCollector_Fetch_RetriesOn500(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("retried"))
+	}))
+	defer server.Close()
+
+	col := NewCollector(Config{
+		Timeout:     time.Second,
+		RatePerHost: 100,
+		Retries:     1,
+		BackoffBase: time.Millisecond,
+		UserAgent:   "test",
+	})
+
+	res, err := col.Fetch(context.Background(), FeedRef{URL: server.URL})
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+	if string(res.Body) != "retried" {
+		t.Errorf("Expected retried, got %s", res.Body)
+	}
+	if attempts.Load() != 2 {
+		t.Errorf("Expected 2 attempts, got %d", attempts.Load())
+	}
+}
+
+func TestCollector_Fetch_RespectsRetryAfterOn429(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", strconv.Itoa(1))
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	col := NewCollector(Config{
+		Timeout:     time.Second,
+		RatePerHost: 100,
+		Retries:     1,
+		BackoffBase: time.Millisecond, // tiny default backoff, Retry-After should dominate
+		UserAgent:   "test",
+	})
+
+	start := time.Now()
+	res, err := col.Fetch(context.Background(), FeedRef{URL: server.URL})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+	if string(res.Body) != "ok" {
+		t.Errorf("Expected ok, got %s", res.Body)
+	}
+	if elapsed < time.Second {
+		t.Errorf("expected Fetch to wait for Retry-After (>=1s), got %s", elapsed)
 	}
 }

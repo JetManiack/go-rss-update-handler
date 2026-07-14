@@ -1,26 +1,26 @@
 # 07. Classificator (`internal/classificator`)
 
-## 1. Назначение
+## 1. Purpose
 
-«Мозг» системы: с помощью LLM решает, является ли обновление **важным** (мажорный релиз,
-breaking changes, критичный security-патч) или **шумом** (dev-теги, RC, минорные бампы).
-Ключевое требование дизайна: помимо текущего обновления модель получает контекст
-**двух последних важных обновлений** этого фида — чтобы оценивать масштаб изменений в сравнении.
+The "brain" of the system: uses an LLM to decide whether an update is **important** (major release,
+breaking changes, critical security patch) or **noise** (dev tags, RC, minor bumps).
+A key design requirement: in addition to the current update, the model receives the context of
+**the two most recent important updates** for that feed — to assess the scale of changes by comparison.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Собирает вход для LLM: текущее событие + история (2 последних важных обновления).
-* Рендерит промпт через `internal/prompt`, вызывает `internal/llm`.
-* Парсит и валидирует структурированный ответ модели (JSON-вердикт).
-* Возвращает вердикт с уверенностью и объяснением.
+**Does:**
+* Assembles the LLM input: current event + history (2 most recent important updates).
+* Renders the prompt via `internal/prompt`, calls `internal/llm`.
+* Parses and validates the structured model response (JSON verdict).
+* Returns the verdict with confidence and explanation.
 
-**НЕ делает:**
-* Не общается с LLM-API напрямую (это `llm`).
-* Не хранит вердикты и историю (это `storage`, через orchestrator).
-* Не отправляет уведомления.
+**Does NOT:**
+* Does not communicate with the LLM API directly (that is `llm`).
+* Does not store verdicts and history (that is `storage`, via orchestrator).
+* Does not send notifications.
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Classifier interface {
@@ -37,67 +37,67 @@ type Verdict struct {
 	Important  bool
 	Category   string  // major_release | breaking_change | security | noise | ...
 	Confidence float64 // 0..1
-	Reason     string  // объяснение модели (для уведомления и отладки)
+	Reason     string  // model explanation (for notification and debugging)
 }
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-1. Данные (текущее событие + история) подставляются в шаблон промпта `classify.md`.
-2. Запрос к LLM с требованием строго JSON-ответа (structured output / json mode при поддержке API).
-3. Ответ парсится и валидируется: обязательные поля, диапазон `Confidence`, известная `Category`.
-4. При невалидном ответе — до N повторных попыток с указанием ошибки формата в промпте.
-5. Порог важности (принято): `Important && Confidence >= confidence_threshold`,
-   дефолт **0.5** — при уверенности модели ниже 50% событие считается шумом
-   и пропускается (уведомление не отправляется); вердикт и confidence сохраняются
-   в `storage` для анализа ложных пропусков (eval, фаза 7).
-6. Правило поверх LLM (принято): **security-патчи всегда важны** — при
-   `Category == "security"` событие считается важным независимо от `Confidence`
-   (порог из п. 5 не применяется): цена пропущенного security-фикса выше цены
-   ложного срабатывания. Правило дублируется инструкцией в промпте.
+1. Data (current event + history) is substituted into the `classify.md` prompt template.
+2. Request to LLM requiring a strict JSON response (structured output / json mode when supported by the API).
+3. Response is parsed and validated: required fields, `Confidence` range, known `Category`.
+4. On invalid response — up to N retries with the format error indicated in the prompt.
+5. Importance threshold (accepted): `Important && Confidence >= confidence_threshold`,
+   default **0.5** — when the model's confidence is below 50% the event is considered noise
+   and is skipped (no notification sent); the verdict and confidence are stored
+   in `storage` for analysis of false negatives (eval, phase 7).
+6. Rule on top of LLM (accepted): **security patches are always important** — when
+   `Category == "security"` the event is considered important regardless of `Confidence`
+   (the threshold from point 5 does not apply): the cost of missing a security fix exceeds the cost
+   of a false positive. The rule is duplicated as an instruction in the prompt.
 
-Пустая история (новый фид, ещё нет важных обновлений) — валидный случай: промпт содержит
-ветку «истории нет, оцени обновление самостоятельно».
+Empty history (new feed, no important updates yet) — valid case: the prompt contains
+a branch "no history, evaluate the update on its own".
 
-**Телеметрия:** на каждый вызов `Classify` создаётся корневой OTEL-спан (трейс в Langfuse),
-внутри — спаны LLM-запросов (включая ретраи формата); в метаданные пишутся `feed_url`,
-`fingerprint`, версия промпта и итоговый вердикт. Вердикты также считаются в Prometheus
-(`gruh_classify_total{verdict=...}`). См. [12-observability.md](12-observability.md).
+**Telemetry:** for each `Classify` call a root OTEL span (trace in Langfuse) is created,
+with inner spans for LLM requests (including format retries); `feed_url`,
+`fingerprint`, prompt version, and the final verdict are written to metadata. Verdicts are also
+counted in Prometheus (`gruh_classify_total{verdict=...}`). See [12-observability.md](12-observability.md).
 
-## 5. Зависимости
+## 5. Dependencies
 
-* `internal/llm` — клиент модели.
-* `internal/prompt` — шаблоны промптов.
-* `internal/observability` — OTEL-трейсер (Langfuse) и метрики классификации.
+* `internal/llm` — model client.
+* `internal/prompt` — prompt templates.
+* `internal/observability` — OTEL tracer (Langfuse) and classification metrics.
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 classificator:
-  confidence_threshold: 0.5   # ниже 50% уверенности — пропуск (принятое решение)
+  confidence_threshold: 0.5   # below 50% confidence — skip (accepted decision)
   max_format_retries: 2
-  history_size: 2   # число последних важных обновлений в контексте
+  history_size: 2   # number of most recent important updates in context
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* LLM недоступен (после ретраев `internal/llm`) — **fail fast**: ошибка наверх
-  и падение процесса без сохранения состояния классификации — аналогично
-  недоступности БД (см. [08-llm.md](08-llm.md) §9, [06-orchestrator.md](06-orchestrator.md) §7).
-* Невалидный JSON после всех ретраев — событие помечается `classification_failed`, алерт; НЕ считается важным по умолчанию (без спама), но логируется для ручного разбора.
-* Слишком длинный контент — усечение с сохранением начала и конца (там обычно changeloge-хайлайты).
-* Промпт-инъекция в release notes — промпт явно инструктирует игнорировать инструкции в данных.
+* LLM unavailable (after `internal/llm` retries) — **fail fast**: error propagated up
+  and process crash without saving classification state — analogous to
+  DB unavailability (see [08-llm.md](08-llm.md) §9, [06-orchestrator.md](06-orchestrator.md) §7).
+* Invalid JSON after all retries — event is marked `classification_failed`, alert; NOT considered important by default (no spam), but logged for manual review.
+* Content too long — truncated preserving the beginning and the end (that is usually where the changelog highlights are).
+* Prompt injection in release notes — the prompt explicitly instructs the model to ignore instructions in data.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit с фейковым LLM-клиентом: валидация ответов, ретраи формата, пороги уверенности, пустая история.
-* Eval-набор (фаза 7): размеченные примеры реальных релизов для регрессионной оценки качества промпта.
+* Unit with a fake LLM client: response validation, format retries, confidence thresholds, empty history.
+* Eval set (phase 7): labeled examples of real releases for regression quality evaluation of the prompt.
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Дефолт при неуверенности — решено (молчать)**: введён коэффициент уверенности;
-  при `Confidence < 0.5` событие пропускается (см. §4, п. 5).
-* **Security-патчи — решено (всегда важны)**: при `Category == "security"` уведомляем
-  независимо от `Confidence` — правило поверх LLM (см. §4, п. 6).
-* **Недоступность LLM — решено (fail fast)**: ошибка и падение без сохранения
-  состояния классификации, аналогично недоступности БД (см. §7).
+* **Default on low confidence — resolved (stay silent)**: a confidence coefficient is introduced;
+  at `Confidence < 0.5` the event is skipped (see §4, point 5).
+* **Security patches — resolved (always important)**: at `Category == "security"` we notify
+  regardless of `Confidence` — a rule on top of LLM (see §4, point 6).
+* **LLM unavailability — resolved (fail fast)**: error and crash without saving
+  classification state, analogous to DB unavailability (see §7).

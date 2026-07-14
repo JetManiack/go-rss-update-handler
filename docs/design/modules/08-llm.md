@@ -1,25 +1,25 @@
 # 08. LLM (`internal/llm`)
 
-## 1. Назначение
+## 1. Purpose
 
-Тонкий транспортный клиент к **OpenAI-совместимому API** (OpenAI, Azure OpenAI, Ollama,
-vLLM, OpenRouter и т.п.). Изолирует остальную систему от деталей конкретного провайдера.
+A thin transport client for the **OpenAI-compatible API** (OpenAI, Azure OpenAI, Ollama,
+vLLM, OpenRouter, etc.). Isolates the rest of the system from the specifics of a particular provider.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Chat completions запросы (`POST /v1/chat/completions`) с поддержкой JSON mode.
-* Таймауты, ретраи с backoff на 429/5xx, уважение `Retry-After`.
-* Учёт использования токенов (метрики: prompt/completion tokens, latency, стоимость).
-* Инструментирование: Prometheus-метрики (`gruh_llm_*`) и OTEL-спаны на каждый запрос
-  с GenAI-атрибутами (экспорт в Langfuse) — см. [12-observability.md](12-observability.md).
-* Ограничение параллельных запросов (семафор) — защита бюджета и rate limits провайдера.
+**Does:**
+* Chat completions requests (`POST /v1/chat/completions`) with JSON mode support.
+* Timeouts, retries with backoff on 429/5xx, respects `Retry-After`.
+* Token usage accounting (metrics: prompt/completion tokens, latency, cost).
+* Instrumentation: Prometheus metrics (`gruh_llm_*`) and OTEL spans on each request
+  with GenAI attributes (exported to Langfuse) — see [12-observability.md](12-observability.md).
+* Concurrent request limiting (semaphore) — protects budget and provider rate limits.
 
-**НЕ делает:**
-* Не строит промпты и не интерпретирует ответы (это `classificator` + `prompt`).
-* Не кэширует ответы (возможное развитие, фаза 7).
+**Does NOT:**
+* Does not build prompts or interpret responses (that is `classificator` + `prompt`).
+* Does not cache responses (possible future development, phase 7).
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Client interface {
@@ -29,7 +29,7 @@ type Client interface {
 type Request struct {
 	System      string
 	User        string
-	JSONMode    bool    // требовать application/json ответ
+	JSONMode    bool    // require application/json response
 	MaxTokens   int
 	Temperature float64
 }
@@ -44,61 +44,61 @@ type Response struct {
 func New(cfg Config) Client
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-* **Реализация поверх `net/http` (принято, см. §9)**: провайдер — vLLM/LiteLLM,
-  нужны только chat completions + JSON mode; формат OpenAI-совместимого API стабилен и прост.
-* `base_url` конфигурируем → работает с любым совместимым провайдером, включая локальные.
-* Ретраи: только идемпотентные ошибки (сетевые, 429, 5xx); 4xx (кроме 429) — фатально сразу.
-* API-ключ — только из переменной окружения (`GRUH_LLM_API_KEY`), в конфиге не хранится.
+* **Implementation over `net/http` (accepted, see §9)**: provider is vLLM/LiteLLM,
+  only chat completions + JSON mode are needed; the OpenAI-compatible API format is stable and simple.
+* `base_url` is configurable → works with any compatible provider, including local ones.
+* Retries: only idempotent errors (network, 429, 5xx); 4xx (except 429) — fatal immediately.
+* API key — from environment variable only (`GRUH_LLM_API_KEY`), not stored in config.
 
-## 5. Зависимости
+## 5. Dependencies
 
-* stdlib `net/http`, `encoding/json` — без внешних LLM-SDK (см. §9).
-* `internal/observability` — метрики и OTEL-трейсер для LLM-телеметрии (Langfuse).
+* stdlib `net/http`, `encoding/json` — no external LLM SDK (see §9).
+* `internal/observability` — metrics and OTEL tracer for LLM telemetry (Langfuse).
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 llm:
-  base_url: http://litellm.internal:4000/v1   # vLLM / LiteLLM (OpenAI-совместимый endpoint)
+  base_url: http://litellm.internal:4000/v1   # vLLM / LiteLLM (OpenAI-compatible endpoint)
   model: gpt-4o-mini
   timeout: 60s
   max_retries: 3
   max_concurrent: 4
-  temperature: 0.1     # классификация — низкая температура
-# api-ключ: env GRUH_LLM_API_KEY
+  temperature: 0.1     # classification — low temperature
+# api key: env GRUH_LLM_API_KEY
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* 429 / quota exceeded — backoff с уважением `Retry-After`; после исчерпания ретраев —
-  ошибка наверх и **fail fast**: процесс падает без сохранения состояния классификации
-  (см. §9 и [06-orchestrator.md](06-orchestrator.md) §7).
-* Контекст модели превышен (`context_length_exceeded`) — специализированная ошибка, по которой classificator усечёт вход.
-* Обрыв соединения / таймаут — retry.
-* Ответ без `choices` или с `finish_reason: length` — ошибка с диагностикой.
+* 429 / quota exceeded — backoff respecting `Retry-After`; after retries exhausted —
+  error propagated up and **fail fast**: process crashes without saving classification state
+  (see §9 and [06-orchestrator.md](06-orchestrator.md) §7).
+* Model context exceeded (`context_length_exceeded`) — specialized error, on which the classificator will truncate its input.
+* Connection drop / timeout — retry.
+* Response with no `choices` or with `finish_reason: length` — error with diagnostics.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit с `httptest.Server`, мимикрирующим OpenAI API: успех, 429 c Retry-After, 5xx, битый JSON, JSON mode.
-* Опциональный smoke-тест против реального провайдера за build-тегом (`//go:build llm_live`).
+* Unit with `httptest.Server` mimicking the OpenAI API: success, 429 with Retry-After, 5xx, malformed JSON, JSON mode.
+* Optional smoke test against a real provider behind a build tag (`//go:build llm_live`).
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **`net/http` vs `openai-go` — решено: своя реализация на `net/http`.**
-  Обоснование для провайдеров vLLM/LiteLLM:
-  * используется один эндпоинт (`/v1/chat/completions` + JSON mode) — это ~200 строк кода,
-    полный SDK избыточен;
-  * `openai-go` развивается вслед за облачным OpenAI API (Responses API, новые поля) —
-    OpenAI-совместимые прокси часто отстают в поддержке новых полей/строгой валидации,
-    тонкий клиент отправляет ровно то, что они понимают;
-  * полный контроль над ретраями/таймаутами/семафором и OTEL-инструментированием
-    без обёрток вокруг чужого transport;
-  * меньше зависимостей, тривиальное тестирование через `httptest.Server`.
-  Если понадобятся streaming/tools — решение можно пересмотреть, интерфейс `Client` это допускает.
-* **Fallback между моделями — решено (в приложении не нужен)**: при необходимости
-  fallback настраивается на стороне LiteLLM-прокси. Если модель недоступна
-  (после исчерпания ретраев) — **ошибка и падение без сохранения состояния
-  классификации** — аналогично недоступности БД (fail fast,
-  см. [11-storage.md](11-storage.md) §9); после рестарта события обрабатываются заново.
+* **`net/http` vs `openai-go` — resolved: custom implementation on `net/http`.**
+  Rationale for vLLM/LiteLLM providers:
+  * only one endpoint is used (`/v1/chat/completions` + JSON mode) — that is ~200 lines of code,
+    a full SDK is overkill;
+  * `openai-go` evolves along with the cloud OpenAI API (Responses API, new fields) —
+    OpenAI-compatible proxies often lag behind in supporting new fields/strict validation;
+    the thin client sends exactly what they understand;
+  * full control over retries/timeouts/semaphore and OTEL instrumentation
+    without wrappers around someone else's transport;
+  * fewer dependencies, trivial testing via `httptest.Server`.
+  If streaming/tools are needed — the decision can be revisited; the `Client` interface allows it.
+* **Fallback between models — resolved (not needed in the application)**: if needed,
+  fallback is configured on the LiteLLM proxy side. If the model is unavailable
+  (after retries exhausted) — **error and crash without saving classification state**
+  — analogous to DB unavailability (fail fast,
+  see [11-storage.md](11-storage.md) §9); after restart events are reprocessed.

@@ -35,8 +35,10 @@ type FeedRepo interface {
 type UpdateRepo interface {
 	InsertNew(ctx context.Context, updates []Update) ([]Update, error)
 	SaveVerdict(ctx context.Context, updateID string, v Verdict) error
+	GetVerdict(ctx context.Context, updateID string) (Verdict, error)
 	LastImportant(ctx context.Context, feedID string, n int) ([]Update, error)
 	MarkDispatched(ctx context.Context, updateID string, channel string) error
+	IsDispatched(ctx context.Context, updateID string, channel string) (bool, error)
 }
 
 // ChannelRepo defines operations on channels.
@@ -145,6 +147,20 @@ func (r *updateRepo) SaveVerdict(ctx context.Context, updateID string, v Verdict
 	}).Error
 }
 
+func (r *updateRepo) GetVerdict(ctx context.Context, updateID string) (Verdict, error) {
+	var u Update
+	err := r.db.WithContext(ctx).Model(&Update{}).Where("id = ?", updateID).First(&u).Error
+	if err != nil {
+		return Verdict{}, err
+	}
+	return Verdict{
+		Important:  *u.VerdictImportant,
+		Category:   u.VerdictCategory,
+		Confidence: u.VerdictConfidence,
+		Reason:     u.VerdictReason,
+	}, nil
+}
+
 func (r *updateRepo) LastImportant(ctx context.Context, feedID string, n int) ([]Update, error) {
 	var updates []Update
 	err := r.db.WithContext(ctx).
@@ -153,6 +169,16 @@ func (r *updateRepo) LastImportant(ctx context.Context, feedID string, n int) ([
 		Limit(n).
 		Find(&updates).Error
 	return updates, err
+}
+
+func (r *updateRepo) IsDispatched(ctx context.Context, updateID string, channelName string) (bool, error) {
+	var ch Channel
+	if err := r.db.WithContext(ctx).Where("name = ?", channelName).First(&ch).Error; err != nil {
+		return false, err
+	}
+	var count int64
+	err := r.db.WithContext(ctx).Model(&Dispatch{}).Where("update_id = ? AND channel_id = ?", updateID, ch.ID).Count(&count).Error
+	return count > 0, err
 }
 
 func (r *updateRepo) MarkDispatched(ctx context.Context, updateID string, channelName string) error {

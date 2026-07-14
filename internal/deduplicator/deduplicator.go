@@ -6,16 +6,16 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
 )
 
-// Deduplicator вычисляет отпечаток (fingerprint) для события.
+// Deduplicator computes a fingerprint for an event.
 type Deduplicator struct{}
 
 func NewDeduplicator() *Deduplicator {
 	return &Deduplicator{}
 }
 
-// Fingerprint вычисляет уникальный отпечаток для UpdateEvent.
+// Fingerprint computes a unique fingerprint for an UpdateEvent.
 func (d *Deduplicator) Fingerprint(e *model.UpdateEvent) string {
-	// Fingerprint основывается на SourceURL и содержимом контента
+	// Fingerprint is based on SourceURL and the content body
 	h := sha256.New()
 	h.Write([]byte(e.SourceURL))
 	h.Write([]byte(e.RawContent))

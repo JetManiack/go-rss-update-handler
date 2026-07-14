@@ -14,7 +14,8 @@ type LogConfig struct {
 
 // Config holds all observability settings.
 type Config struct {
-	Log LogConfig `koanf:"log"`
+	Log     LogConfig `koanf:"log"`
+	Metrics string    `koanf:"metrics"` // address, e.g., ":9090"
 }
 
 // Validate checks that Log.Level and Log.Format contain recognised values.

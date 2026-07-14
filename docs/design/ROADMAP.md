@@ -1,158 +1,150 @@
-# GRUH — Роадмап разработки
+# GRUH — Development Roadmap
 
-Роадмап разбит на фазы; каждая фаза завершается работоспособным инкрементом.
-Порядок реализации модулей выбран так, чтобы как можно раньше получить сквозной
-вертикальный срез (feed → парсинг → дедупликация → уведомление), а LLM-классификацию
-и распределённость добавлять поверх стабильного ядра.
+The roadmap is divided into phases; each phase concludes with a working increment.
+Module implementation order is chosen to achieve an end-to-end vertical slice (feed → parsing → deduplication → notification) as early as possible, while LLM classification and distribution are added on top of a stable core.
 
-## Процесс разработки
+## Development Process
 
-Все фазы реализуются по единому процессу:
+All phases are implemented following a unified process:
 
-* **TDD** — каждая фича начинается с падающего теста: red → green → refactor.
-  Пункт чек-листа считается выполненным только при наличии тестов, покрывающих его поведение.
-* **GitFlow (feature branches)** — на каждую фичу (обычно один пункт чек-листа) создаётся
-  отдельная ветка `feature/<краткое-имя>` от `main`. После прохождения всех тестов
-  (локально и в CI) ветка мерджится в `main`. `main` всегда в зелёном состоянии.
-* **Definition of Done** — ветка не считается завершённой и не мерджится в `main`, пока
-  локально не пройдены без ошибок `make test`, `make lint`, `make security` и `make build`
-  (см. `Makefile` и `.junie/guidelines.md`).
-* **Отметка прогресса** — после реализации и мержа пункта чек-листа его чекбокс
-  отмечается как `[x]` в этом файле (см. `.junie/guidelines.md`).
+* **TDD** — each feature starts with a failing test: red → green → refactor.
+  A checklist item is considered complete only when there are tests covering its behavior.
+* **GitFlow (feature branches)** — for every feature (usually one checklist item), a separate branch `feature/<short-name>` is created from `main`. After passing all tests (locally and in CI), the branch is merged into `main`. `main` is always in a green state.
+* **Definition of Done** — a branch is not considered complete and is not merged into `main` until `make test`, `make lint`, `make security`, and `make build` pass without errors locally (see `Makefile` and `.junie/guidelines.md`).
+* **Progress Tracking** — after implementation and merging of a checklist item, its checkbox is marked as `[x]` in this file (see `.junie/guidelines.md`).
 
-## Фаза 0 — Каркас проекта (завершена)
+## Phase 0 — Project Skeleton (completed)
 
-**Цель:** собираемый бинарь и инфраструктура разработки.
+**Goal:** buildable binary and development infrastructure.
 
-> Предусловие: git-репозиторий инициализируется владельцем проекта до начала разработки
-> (`git init`, первый коммит с документацией, ветка `main`).
+> Prerequisite: git repository is initialized by the project owner before development starts
+> (`git init`, first commit with documentation, `main` branch).
 
-- [x] Инициализация модуля, layout каталогов (`cmd/gruh`, `internal/*`, `deploy/`, `docs/`)
-- [x] CLI-скелет на `urfave/cli/v3`: **одна рут-команда** `gruh` = запуск сервиса
-  (функции serve), флаги `--config`, `--version` и `--check-config` (валидация конфига
-  без запуска); отдельных команд `serve`/`migrate`/`version` нет,
-  сабкоманды зарезервированы под роли микросервисов (фаза 5)
-- [x] `internal/config`: загрузка конфигурации (koanf: YAML + env, приоритет env), fail-fast валидация, `config.example.yaml`
-- [x] `internal/observability` (базовая часть): логирование `log/slog` (уровни, text/JSON, контекстные атрибуты), graceful shutdown по сигналам
-- [x] `Makefile` (build, lint, test), `golangci-lint`, CI — **GitHub Actions** (`.github/workflows/ci.yml`: build + lint + `go test ./...` на PR и `main`)
-- [ ] `docker-compose` для локальной разработки (PostgreSQL, Redis)
+- [x] Module initialization, directory layout (`cmd/gruh`, `internal/*`, `deploy/`, `docs/`)
+- [x] CLI skeleton based on `urfave/cli/v3`: **a single root command** `gruh` = service start
+  (serve functionality), flags `--config`, `--version`, and `--check-config` (config validation
+  without execution); no separate `serve`/`migrate`/`version` commands,
+  subcommands are reserved for microservice roles (Phase 5)
+- [x] `internal/config`: configuration loading (koanf: YAML + env, env priority), fail-fast validation, `config.example.yaml`
+- [x] `internal/observability` (base part): logging `log/slog` (levels, text/JSON, contextual attributes), graceful shutdown on signals
+- [x] `Makefile` (build, lint, test), `golangci-lint`, CI — **GitHub Actions** (`.github/workflows/ci.yml`: build + lint + `go test ./...` on PR and `main`)
+- [ ] `docker-compose` for local development (PostgreSQL, Redis)
 
-**Документы:** [12-observability.md](modules/12-observability.md), [13-config.md](modules/13-config.md)
+**Documents:** [12-observability.md](modules/12-observability.md), [13-config.md](modules/13-config.md)
 
-**Выход:** `gruh --version` работает, окружение поднимается одной командой.
+**Output:** `gruh --version` works, environment spins up with one command.
 
-## Фаза 1 — Хранилище и модель данных (завершена)
+## Phase 1 — Storage and Data Model (completed)
 
-**Цель:** слой персистентности, на который опираются все остальные модули.
+**Goal:** persistence layer that all other modules rely on.
 
-- [x] `internal/storage`: модели GORM (Feed, Update, RawContent, Channel, FeedChannelMapping, Dispatch);
-  fingerprint/вердикт хранятся вечно, сырой контент — в `raw_contents` с retention-политикой
-- [x] Репозитории + миграции (AutoMigrate / версионированные) — выполняются автоматически
-  при старте рут-команды (fail fast при ошибке), отдельной команды `migrate` нет
-- [x] Поддержка PostgreSQL (прод) и SQLite (локально/тесты)
-- [x] БД — источник истины для фидов/каналов/маппинга; пока управление — напрямую в БД
-  (seed/SQL-скрипты); управляющие транспорты (Slack/Telegram-бот) — отдельным шагом (фаза 7);
-  интервалы опроса — в конфиге
+- [x] `internal/storage`: GORM models (Feed, Update, RawContent, Channel, FeedChannelMapping, Dispatch);
+  fingerprint/verdict stored forever, raw content in `raw_contents` with retention policy
+- [x] Repositories + migrations (AutoMigrate / versioned) — executed automatically
+  on root command startup (fail fast on error), no separate `migrate` command
+- [x] PostgreSQL (prod) and SQLite (local/tests) support
+- [x] DB is the source of truth for feeds/channels/mapping; management is currently done directly in DB
+  (seed/SQL scripts); management transports (Slack/Telegram bot) — separate step (Phase 7);
+  polling intervals in config
 
-**Документы:** [11-storage.md](modules/11-storage.md), [13-config.md](modules/13-config.md)
+**Documents:** [11-storage.md](modules/11-storage.md), [13-config.md](modules/13-config.md)
 
-## Фаза 2 — Сбор и парсинг (вертикальный срез без LLM) (завершена)
+## Phase 2 — Collection and Parsing (vertical slice without LLM) (completed)
 
-**Цель:** система опрашивает фиды и складывает новые уникальные обновления в БД.
+**Goal:** the system polls feeds and stores new unique updates in the DB.
 
-- [x] `internal/scheduler`: интервальный планировщик с jitter
-- [x] `internal/collector`: HTTP-клиент с `ETag` / `If-Modified-Since`, rate limiting, retry/backoff
-- [x] `internal/model`: общий тип `UpdateEvent` (принятое решение, см. [03-parser.md](modules/03-parser.md) §9)
-- [x] `internal/parser`: gofeed → единый `UpdateEvent` (semver-тег не извлекается — это зона classificator'а)
-- [x] `internal/deduplicator`: fingerprinting, отсечение дубликатов
-- [x] In-memory реализация `internal/bus` (интерфейс шины фиксируется здесь;
-  топики-константы `updates.new` / `updates.classified`, версия схемы — в конверте `Message`,
-  см. [05-bus.md](modules/05-bus.md) §9)
-- [x] Базовый `internal/orchestrator`: связывание шагов пайплайна
+- [x] `internal/scheduler`: interval scheduler with jitter
+- [x] `internal/collector`: HTTP client with `ETag` / `If-Modified-Since`, rate limiting, retry/backoff
+- [x] `internal/model`: common `UpdateEvent` type (decision made, see [03-parser.md](modules/03-parser.md) §9)
+- [x] `internal/parser`: gofeed → unified `UpdateEvent` (semver tag not extracted — this is the classificator's zone)
+- [x] `internal/deduplicator`: fingerprinting, deduplication
+- [x] In-memory `internal/bus` implementation (bus interface is fixed here;
+  topic constants `updates.new` / `updates.classified`, schema version in `Message` envelope,
+  see [05-bus.md](modules/05-bus.md) §9)
+- [x] Basic `internal/orchestrator`: pipeline step linking
 
-**Документы:** [01-scheduler.md](modules/01-scheduler.md), [02-collector.md](modules/02-collector.md),
+**Documents:** [01-scheduler.md](modules/01-scheduler.md), [02-collector.md](modules/02-collector.md),
 [03-parser.md](modules/03-parser.md), [04-deduplicator.md](modules/04-deduplicator.md),
 [05-bus.md](modules/05-bus.md), [06-orchestrator.md](modules/06-orchestrator.md)
 
-**Выход:** монолитный `gruh` (рут-команда) наполняет БД новыми обновлениями GitHub Atom-фидов.
+**Output:** monolithic `gruh` (root command) populates DB with new GitHub Atom feed updates.
 
-## Фаза 3 — LLM-классификация (завершена)
+## Phase 3 — LLM Classification (completed)
 
-**Цель:** отделение важных обновлений от шума.
+**Goal:** separating important updates from noise.
 
-- [x] `internal/llm`: OpenAI-совместимый клиент (таймауты, retry, учёт токенов)
-- [x] `internal/prompt`: встроенные промпты через `go:embed`, переопределение из пользовательской директории, Go templates;
-  YAML-хедер промпта (`name`/`version`/`critical`/`description`, см. [09-prompt.md](modules/09-prompt.md) §4)
-- [x] `internal/classificator`: вердикт важности; контекст = текущее обновление + 2 последних важных;
-  порог уверенности 0.5, security-патчи всегда важны (правило поверх LLM)
-- [x] Сохранение вердиктов и истории важных обновлений в `storage`
-- [x] Недоступность LLM (после ретраев) — fail fast: ошибка и падение без сохранения
-  состояния классификации (fallback между моделями — на стороне LiteLLM, не в приложении)
-- [x] LLM-телеметрия: трейсы классификации в **Langfuse** через OTEL/OTLP (GenAI-атрибуты, токены, версия промпта)
+- [x] `internal/llm`: OpenAI-compatible client (timeouts, retry, token accounting)
+- [x] `internal/prompt`: built-in prompts via `go:embed`, override from user directory, Go templates;
+  YAML prompt header (`name`/`version`/`critical`/`description`, see [09-prompt.md](modules/09-prompt.md) §4)
+- [x] `internal/classificator`: importance verdict; context = current update + 2 last important;
+  confidence threshold 0.5, security patches always important (rule on top of LLM)
+- [x] Storing verdicts and history of important updates in `storage`
+- [x] LLM unavailability (after retries) — fail fast: error and crash without saving
+  classification state (fallback between models — on LiteLLM side, not in app)
+- [x] LLM telemetry: classification traces in **Langfuse** via OTEL/OTLP (GenAI attributes, tokens, prompt version)
 
-**Документы:** [07-classificator.md](modules/07-classificator.md), [08-llm.md](modules/08-llm.md),
+**Documents:** [07-classificator.md](modules/07-classificator.md), [08-llm.md](modules/08-llm.md),
 [09-prompt.md](modules/09-prompt.md), [12-observability.md](modules/12-observability.md)
 
-**Выход:** каждое новое обновление получает вердикт important/noise с объяснением.
+**Output:** each new update receives an important/noise verdict with explanation.
 
-## Фаза 4 — Доставка уведомлений
+## Phase 4 — Notification Delivery
 
-**Цель:** пользователи получают уведомления о важных обновлениях.
+**Goal:** users receive notifications about important updates.
 
-- [ ] `internal/dispatcher`: общий интерфейс `Notifier`
-- [ ] Реализации: Webhook → Slack → Telegram
-- [ ] Шаблоны текста уведомлений: Go template, дефолты через `go:embed`,
-  оверрайд файлом из конфига (`dispatcher.templates.*`)
-- [ ] Маршрутизация по маппингу `Feed URL -> каналы`
-- [ ] Retry-политика доставки и защита от повторной отправки
+- [x] `internal/dispatcher`: general `Notifier` interface
+- [x] Implementations: Webhook → Slack → Telegram
+- [x] Notification text templates: Go template, defaults via `go:embed`,
+- [x] Routing based on `Feed URL -> channels` mapping
+- [x] Delivery retry policy and protection against duplicate sending
 
-**Документы:** [10-dispatcher.md](modules/10-dispatcher.md)
+**Documents:** [10-dispatcher.md](modules/10-dispatcher.md)
 
-**Выход:** полный MVP-цикл: фид → классификация → уведомление в канал.
+**Output:** full MVP cycle: feed → classification → notification to channel.
 
-## Фаза 5 — Распределённый режим (Redis)
+## Phase 5 — Distributed Mode (Redis)
 
-**Цель:** горизонтальное масштабирование в k8s.
+**Goal:** horizontal scaling in k8s.
 
-- [ ] Redis-реализация `internal/bus` (Streams + consumer groups, ack/retry, DLQ)
-- [ ] Разделение ролей процессов: collector / worker(classificator) / dispatcher —
-  здесь появляются сабкоманды `gruh collector | worker | dispatcher` (рут-команда без сабкоманды = монолит)
-- [ ] Гарантии идемпотентности при повторной доставке из шины
-- [ ] Распределённые блокировки планировщика (несколько реплик scheduler)
+- [x] Redis-based `internal/bus` implementation (Streams + consumer groups, ack/retry, DLQ)
+- [x] Process role separation: collector / worker(classificator) / dispatcher —
+  subcommands `gruh collector | worker | dispatcher` appear here (root command without subcommand = monolith)
+- [x] Idempotency guarantees during message re-delivery from bus
+- [x] Distributed scheduler locks (multiple scheduler replicas)
 
-**Документы:** [05-bus.md](modules/05-bus.md), [06-orchestrator.md](modules/06-orchestrator.md)
+**Documents:** [05-bus.md](modules/05-bus.md), [06-orchestrator.md](modules/06-orchestrator.md)
 
-## Фаза 6 — Деплой и эксплуатация
+## Phase 6 — Deployment and Operations
 
-**Цель:** production-ready развёртывание.
+**Goal:** production-ready deployment.
 
-- [ ] `Dockerfile` (multi-stage, distroless)
-- [ ] Helm-чарты в `deploy/`, `skaffold.yaml`
-- [ ] HPA по метрикам очереди/CPU
-- [ ] Метрики Prometheus по всем модулям (`/metrics`), health/readiness-пробы
-- ОТКЛОНЕНО: трейсинг всего пайплайна — OTEL-трейсинг остаётся только для LLM
-  и только для Langfuse (принятое решение, см. [12-observability.md](modules/12-observability.md) §9)
+- [x] `Dockerfile` (multi-stage, distroless)
+- [ ] Helm charts in `deploy/`, `skaffold.yaml`
+- [ ] HPA based on queue/CPU metrics
+- [x] Prometheus metrics for all modules (`/metrics`), health/readiness probes
+- REJECTED: end-to-end pipeline tracing — OTEL tracing remains only for LLM
+  and only for Langfuse (decision made, see [12-observability.md](modules/12-observability.md) §9)
 
-**Документы:** [12-observability.md](modules/12-observability.md)
+**Documents:** [12-observability.md](modules/12-observability.md)
 
-## Фаза 7 — Развитие (backlog)
+## Phase 7 — Future Development (backlog)
 
-- [ ] Управляющие транспорты для фидов и каналов — Slack/Telegram-бот (команды добавления/списка/удаления
-  фидов прямо из мессенджера); опционально — Web UI / API
-- [ ] Дайджесты (агрегация нескольких обновлений в одно уведомление): выключены
-  по умолчанию, включаются и формируются отдельно для каждого канала
-  (расписание и шаблон per-channel, см. [10-dispatcher.md](modules/10-dispatcher.md) §4)
-- [ ] Retention-джоба для `raw_contents` (очистка старого сырого контента,
-  см. [11-storage.md](modules/11-storage.md) §9)
-- [ ] Дополнительные типы источников (не-GitHub RSS, changelog-страницы)
-- [ ] Оценка качества классификации (feedback loop, разметка ложных срабатываний)
-- [ ] Кэширование/бюджетирование LLM-вызовов
+- [ ] Control transports for feeds and channels — Slack/Telegram bot (add/list/delete
+  feeds directly from messenger); optionally — Web UI / API
+- [ ] Digests (aggregating multiple updates into one notification): disabled
+  by default, enabled and formed separately for each channel
+  (schedule and per-channel template, see [10-dispatcher.md](modules/10-dispatcher.md) §4)
+- [ ] Retention job for `raw_contents` (cleaning up old raw content,
+  see [11-storage.md](modules/11-storage.md) §9)
+- [ ] Additional source types (non-GitHub RSS, changelog pages)
+- [ ] Classification quality evaluation (feedback loop, flagging false positives)
+- [ ] LLM call caching/budgeting
 
-## Зависимости фаз
+## Phase Dependencies
 
 ```
-Фаза 0 ──▶ Фаза 1 ──▶ Фаза 2 ──▶ Фаза 3 ──▶ Фаза 4 ──▶ Фаза 5 ──▶ Фаза 6 ──▶ Фаза 7
-                        (MVP-ядро)  (интеллект)  (MVP)     (масштаб)  (prod)
+Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5 ──▶ Phase 6 ──▶ Phase 7
+                        (MVP-core)  (intelligence)  (MVP)     (scaling)  (prod)
 ```
 
-Фазы 5 и 6 могут выполняться параллельно после завершения фазы 4.
+Phases 5 and 6 can be executed in parallel after completing Phase 4.

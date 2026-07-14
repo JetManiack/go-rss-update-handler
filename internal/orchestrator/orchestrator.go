@@ -9,6 +9,7 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/classificator"
 	"github.com/jetbrains/go-rss-update-handler/internal/collector"
 	"github.com/jetbrains/go-rss-update-handler/internal/deduplicator"
+	"github.com/jetbrains/go-rss-update-handler/internal/dispatcher"
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
 	"github.com/jetbrains/go-rss-update-handler/internal/parser"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
@@ -22,6 +23,7 @@ type Orchestrator struct {
 	feeds        storage.FeedRepo
 	updates      storage.UpdateRepo
 	classifier   classificator.Service
+	dispatcher   dispatcher.Dispatcher
 	logger       *slog.Logger
 }
 
@@ -33,9 +35,10 @@ func NewOrchestrator(
 	feeds storage.FeedRepo,
 	updates storage.UpdateRepo,
 	classifier classificator.Service,
+	dispatcher dispatcher.Dispatcher,
 	logger *slog.Logger,
 ) *Orchestrator {
-	return &Orchestrator{c, p, d, b, feeds, updates, classifier, logger}
+	return &Orchestrator{c, p, d, b, feeds, updates, classifier, dispatcher, logger}
 }
 
 func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error {
@@ -83,6 +86,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 			ID:      uuid.New().String(),
 			Version: 1,
 			Event: model.UpdateEvent{
+				ID:          u.ID,
 				FeedID:      u.FeedID,
 				SourceURL:   u.SourceURL,
 				RawContent:  u.RawContent.Content,
@@ -104,15 +108,35 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := o.updates.SaveVerdict(ctx, msg.Event.FeedID, storage.Verdict{
-			Important: verdict.Important,
-			Category:  verdict.Category,
-			Reason:    verdict.Reason,
+		if err := o.updates.SaveVerdict(ctx, msg.Event.ID, storage.Verdict{
+			Important:  verdict.Important,
+			Category:   verdict.Category,
+			Confidence: verdict.Confidence,
+			Reason:     verdict.Reason,
 		}); err != nil {
 			return err
 		}
 		if verdict.Important {
-			return o.bus.Publish(ctx, "updates.classified", msg)
+			if err := o.bus.Publish(ctx, "updates.classified", msg); err != nil {
+				return err
+			}
+			channels, err := o.feeds.ChannelsFor(ctx, msg.Event.FeedID)
+			if err != nil {
+				return err
+			}
+			if len(channels) == 0 {
+				return nil
+			}
+			channelIDs := make([]string, len(channels))
+			for i, name := range channels {
+				channelIDs[i] = name
+			}
+			_, err = o.dispatcher.Dispatch(ctx, dispatcher.Notification{
+				Event:   msg.Event,
+				Verdict: verdict,
+				FeedURL: msg.Event.SourceURL,
+			}, channelIDs)
+			return err
 		}
 		return nil
 	})

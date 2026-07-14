@@ -5,25 +5,37 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
+
 	"github.com/jetbrains/go-rss-update-handler/internal/bus"
+	"github.com/jetbrains/go-rss-update-handler/internal/classificator"
 	"github.com/jetbrains/go-rss-update-handler/internal/collector"
 	"github.com/jetbrains/go-rss-update-handler/internal/deduplicator"
+	"github.com/jetbrains/go-rss-update-handler/internal/dispatcher"
+	"github.com/jetbrains/go-rss-update-handler/internal/llm"
 	"github.com/jetbrains/go-rss-update-handler/internal/parser"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
-	"time"
+	"gorm.io/gorm"
 )
 
-type mockFeedRepo struct{ storage.FeedRepo }
-func (r *mockFeedRepo) UpdateCacheHeaders(ctx context.Context, id, etag, lm string) error { return nil }
+// fakeLLM is a test double that always classifies the update as important,
+// used only to isolate the real LLM API call in this integration test.
+type fakeLLM struct{}
 
-type mockUpdateRepo struct{ storage.UpdateRepo }
-func (r *mockUpdateRepo) InsertNew(ctx context.Context, u []storage.Update) ([]storage.Update, error) { return u, nil }
+func (f *fakeLLM) Complete(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{Content: `{"important": true, "category": "release", "confidence": 0.8, "reason": "test"}`}, nil
+}
 
-func TestOrchestrator(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+// fakePrompts is a test double avoiding disk/registry dependencies for the prompt template.
+type fakePrompts struct{}
+
+func (f *fakePrompts) Render(_ string, _ any) (string, error) {
+	return "prompt", nil
+}
+
+const feedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <item>
@@ -32,49 +44,143 @@ func TestOrchestrator(t *testing.T) {
       <pubDate>Wed, 21 Oct 2025 07:28:00 GMT</pubDate>
     </item>
   </channel>
-</rss>`))
-	}))
-	defer server.Close()
+</rss>`
 
-	b := bus.NewMemoryBus()
+type testFixture struct {
+	orch  *Orchestrator
+	store storage.Store
+	db    *gorm.DB
+	feed  storage.Feed
+}
+
+func newTestFixture(t *testing.T) *testFixture {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == "etag-cached" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", "etag-new")
+		w.Header().Set("Last-Modified", "Wed, 21 Oct 2025 07:28:00 GMT")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(feedXML))
+	}))
+	t.Cleanup(server.Close)
+
+	dbPath := filepath.Join(t.TempDir(), "orchestrator_test.db")
+	store, db, err := storage.InitDB(storage.Config{
+		Driver:       "sqlite",
+		DSN:          dbPath,
+		MaxOpenConns: 5,
+	})
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	feed := storage.Feed{
+		ID:        "feed-1",
+		URL:       server.URL,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	if err := db.Create(&feed).Error; err != nil {
+		t.Fatalf("failed to seed feed: %v", err)
+	}
+
 	c := collector.NewCollector(collector.Config{
 		Timeout:     time.Second,
-		RatePerHost: 10,
+		RatePerHost: 100,
 		Retries:     1,
 		BackoffBase: time.Millisecond,
 		UserAgent:   "test",
 	})
 	p := parser.NewParser()
 	d := deduplicator.NewDeduplicator()
-	o := NewOrchestrator(c, p, d, b, &mockFeedRepo{}, &mockUpdateRepo{}, nil, slog.Default())
-	
-	received := make(chan bus.Message, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	
-	go func() {
-		_ = b.Subscribe(ctx, "updates.new", "", func(ctx context.Context, msg bus.Message) error {
-			received <- msg
-			return nil
-		})
-	}()
-	time.Sleep(10 * time.Millisecond)
-	
-	err := o.ProcessFeed(context.Background(), storage.Feed{ID: "feed-1", URL: server.URL})
-	if err != nil {
+	b := bus.NewMemoryBus()
+	classifierSvc := classificator.New(&fakeLLM{}, &fakePrompts{}, store.Updates())
+
+	orch := NewOrchestrator(c, p, d, b, store.Feeds(), store.Updates(), classifierSvc, &dispatcher.Service{Notifiers: make(map[string]dispatcher.Notifier)}, slog.Default())
+
+	return &testFixture{orch: orch, store: store, db: db, feed: feed}
+}
+
+func TestOrchestrator_ProcessFeed_PersistsUpdatesAndSkipsDuplicates(t *testing.T) {
+	f := newTestFixture(t)
+	ctx := t.Context()
+
+	if err := f.orch.ProcessFeed(ctx, f.feed); err != nil {
 		t.Fatalf("ProcessFeed failed: %v", err)
 	}
-	
-	select {
-	case msg := <-received:
-		if msg.Event.Fingerprint == "" {
-			// This was expected before, but let's see what's actually happening
-			// It seems Deduplicator.Fingerprint wasn't called or produced empty
-			// Actually I need to check the event fingerprint
-			t.Logf("Fingerprint: %s", msg.Event.Fingerprint)
-			t.Errorf("Expected fingerprint, got empty")
-		}
-	case <-time.After(1 * time.Second):
-		t.Error("Timed out waiting for message")
+
+	var count int64
+	if err := f.db.Model(&storage.Update{}).Where("feed_id = ?", f.feed.ID).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count updates: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 update after first ProcessFeed, got %d", count)
+	}
+
+	// Re-processing the same feed content must not create duplicate updates,
+	// since the fingerprint-based deduplication should skip the item.
+	if err := f.orch.ProcessFeed(ctx, f.feed); err != nil {
+		t.Fatalf("second ProcessFeed failed: %v", err)
+	}
+	if err := f.db.Model(&storage.Update{}).Where("feed_id = ?", f.feed.ID).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count updates after second run: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected still 1 update after duplicate ProcessFeed, got %d", count)
+	}
+}
+
+func TestOrchestrator_ProcessFeed_UpdatesCacheHeaders(t *testing.T) {
+	f := newTestFixture(t)
+	ctx := t.Context()
+
+	if err := f.orch.ProcessFeed(ctx, f.feed); err != nil {
+		t.Fatalf("ProcessFeed failed: %v", err)
+	}
+
+	var updatedFeed storage.Feed
+	if err := f.db.First(&updatedFeed, "id = ?", f.feed.ID).Error; err != nil {
+		t.Fatalf("failed to fetch feed: %v", err)
+	}
+	if updatedFeed.Etag != "etag-new" {
+		t.Errorf("expected ETag to be persisted as 'etag-new', got %q", updatedFeed.Etag)
+	}
+	if updatedFeed.LastModified != "Wed, 21 Oct 2025 07:28:00 GMT" {
+		t.Errorf("expected LastModified to be persisted, got %q", updatedFeed.LastModified)
+	}
+}
+
+func TestOrchestrator_RunWorker_ClassifiesAndSavesVerdict(t *testing.T) {
+	f := newTestFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	go func() {
+		_ = f.orch.RunWorker(ctx)
+	}()
+	time.Sleep(20 * time.Millisecond) // let the subscription register before publishing
+
+	if err := f.orch.ProcessFeed(ctx, f.feed); err != nil {
+		t.Fatalf("ProcessFeed failed: %v", err)
+	}
+
+	// MemoryBus.Publish invokes subscribed handlers synchronously, so by the
+	// time ProcessFeed returns the verdict should already be persisted.
+	important, err := f.store.Updates().LastImportant(ctx, f.feed.ID, 10)
+	if err != nil {
+		t.Fatalf("LastImportant failed: %v", err)
+	}
+	if len(important) != 1 {
+		t.Fatalf("expected 1 important update after classification, got %d", len(important))
+	}
+	if important[0].VerdictCategory != "release" {
+		t.Errorf("expected category 'release', got %q", important[0].VerdictCategory)
+	}
+	if important[0].VerdictConfidence != 0.8 {
+		t.Errorf("expected confidence 0.8, got %v", important[0].VerdictConfidence)
 	}
 }

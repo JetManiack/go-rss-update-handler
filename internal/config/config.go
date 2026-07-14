@@ -6,22 +6,44 @@ import (
 	"fmt"
 	"os"
 
+	"time"
+
 	"github.com/go-viper/mapstructure/v2"
 	koanf "github.com/knadh/koanf/v2"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 
+	"github.com/jetbrains/go-rss-update-handler/internal/collector"
 	"github.com/jetbrains/go-rss-update-handler/internal/llm"
 	"github.com/jetbrains/go-rss-update-handler/internal/observability"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
+
+type SchedulerConfig struct {
+	Interval time.Duration `koanf:"interval"`
+	Jitter   time.Duration `koanf:"jitter"`
+}
+
+type PromptConfig struct {
+	Dir string `koanf:"dir"`
+}
+
+type DispatcherConfig struct {
+	Slack    map[string]string `koanf:"slack"`
+	Telegram map[string]map[string]string `koanf:"telegram"`
+}
 
 // Config is the root application configuration.
 type Config struct {
 	Storage       storage.Config       `koanf:"storage"`
 	LLM           llm.Config           `koanf:"llm"`
 	Observability observability.Config `koanf:"observability"`
+	Scheduler     SchedulerConfig      `koanf:"scheduler"`
+	Collector     collector.Config     `koanf:"collector"`
+	Prompt        PromptConfig         `koanf:"prompt"`
+	Dispatcher    DispatcherConfig     `koanf:"dispatcher"`
+	Feeds         []string             `koanf:"feeds"`
 }
 
 // envKeyMap is the closed set of environment variable → koanf key path mappings.
@@ -35,8 +57,12 @@ var envKeyMap = map[string]string{
 	"GRUH_LLM_RETRIES":    "llm.max_retries",
 	"GRUH_LLM_CONCURRENT": "llm.max_concurrent",
 	"GRUH_LLM_TEMP":       "llm.temperature",
-	"GRUH_LOG_LEVEL":      "observability.log.level",
-	"GRUH_LOG_FORMAT":     "observability.log.format",
+	"GRUH_SCHEDULER_INTERVAL": "scheduler.interval",
+	"GRUH_SCHEDULER_JITTER":   "scheduler.jitter",
+	"GRUH_COLLECTOR_TIMEOUT":  "collector.timeout",
+	"GRUH_COLLECTOR_RETRIES":  "collector.retries",
+	"GRUH_LOG_LEVEL":          "observability.log.level",
+	"GRUH_LOG_FORMAT":         "observability.log.format",
 }
 
 // Load reads configuration from (in order of increasing precedence):
@@ -51,12 +77,20 @@ func Load(path string) (*Config, error) {
 
 	// 1. Defaults.
 	defaults := map[string]any{
-		"observability.log.level":  "info",
-		"observability.log.format": "json",
-		"llm.timeout":              "60s",
-		"llm.max_retries":          3,
-		"llm.max_concurrent":       4,
-		"llm.temperature":          0.1,
+		"observability.log.level":   "info",
+		"observability.log.format":  "json",
+		"llm.timeout":               "60s",
+		"llm.max_retries":           3,
+		"llm.max_concurrent":        4,
+		"llm.temperature":           0.1,
+		"scheduler.interval":        "1h",
+		"scheduler.jitter":          "5m",
+		"collector.timeout":         "30s",
+		"collector.rate_per_host":   1.0,
+		"collector.retries":         3,
+		"collector.backoff_base":    "1s",
+		"collector.user_agent":      "gruh/1.0",
+		"prompt.dir":                "assets/prompts",
 	}
 	for key, val := range defaults {
 		if err := k.Set(key, val); err != nil {
@@ -113,6 +147,10 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+func (c *DispatcherConfig) Validate() error {
+	return nil
+}
+
 // Validate runs validation on every configuration section and returns all
 // errors joined together so that the caller sees every violation at once.
 func (c *Config) Validate() error {
@@ -126,6 +164,12 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Observability.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("observability: %w", err))
+	}
+	if err := c.Collector.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("collector: %w", err))
+	}
+	if err := c.Dispatcher.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("dispatcher: %w", err))
 	}
 
 	return errors.Join(errs...)

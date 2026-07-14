@@ -1,81 +1,81 @@
 # 03. Parser (`internal/parser`)
 
-## 1. Назначение
+## 1. Purpose
 
-Преобразует сырое содержимое фида (RSS 2.0 / Atom / JSON Feed) в унифицированный внутренний
-формат — список `UpdateEvent`. Скрывает от остального пайплайна различия форматов.
+Converts raw feed content (RSS 2.0 / Atom / JSON Feed) into a unified internal
+format — a list of `UpdateEvent`. Hides format differences from the rest of the pipeline.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Автоопределение формата и парсинг через `gofeed`.
-* Маппинг записей фида в `UpdateEvent` (SourceURL, RawContent, PublishedAt).
-* Нормализация: временные зоны → UTC, очистка/усечение HTML-контента, выбор наиболее
-  информативного поля (content > description > title).
+**Does:**
+* Auto-detects format and parses via `gofeed`.
+* Maps feed entries to `UpdateEvent` (SourceURL, RawContent, PublishedAt).
+* Normalizes: time zones → UTC, HTML content cleaning/truncation, selection of the most
+  informative field (content > description > title).
 
-**НЕ делает:**
-* Не проверяет уникальность (это `deduplicator`).
-* Не вычисляет fingerprint (это `deduplicator`), но предоставляет стабильные поля для него.
-* Не выполняет сетевых запросов.
+**Does NOT:**
+* Does not check uniqueness (that is `deduplicator`).
+* Does not compute fingerprints (that is `deduplicator`), but provides stable fields for them.
+* Does not make network requests.
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Parser interface {
-	// Parse разбирает сырое тело фида и возвращает события в порядке публикации (новые первыми).
+	// Parse parses the raw feed body and returns events in publication order (newest first).
 	Parse(ctx context.Context, feedURL string, body []byte) ([]UpdateEvent, error)
 }
 
-// UpdateEvent — ядро модели данных системы; определён в пакете `internal/model`
-// (принятое решение, см. §9) и используется parser, bus, deduplicator, storage.
+// UpdateEvent — the core data model of the system; defined in the `internal/model` package
+// (accepted decision, see §9) and used by parser, bus, deduplicator, storage.
 type UpdateEvent struct {
-	SourceURL   string    // URL записи (link) либо URL фида
-	RawContent  string    // нормализованный контент записи
+	SourceURL   string    // URL of the entry (link) or the feed URL
+	RawContent  string    // normalized entry content
 	PublishedAt time.Time // UTC
-	Fingerprint string    // заполняется deduplicator'ом
+	Fingerprint string    // filled in by the deduplicator
 }
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-* `gofeed.Parser` с `ParseString`/`Parse` — универсален для RSS/Atom/JSON.
-* Для GitHub Atom: запись = релиз/тег; `SourceURL` = `entry.Link`, контент = `entry.Content`
-  (release notes в HTML), заголовок содержит имя тега.
-* Fallback для дат: `Published` → `Updated` → время загрузки (с пометкой).
-* Ограничение размера `RawContent` (например, 64 KiB) для защиты LLM-контекста и БД.
+* `gofeed.Parser` with `ParseString`/`Parse` — universal for RSS/Atom/JSON.
+* For GitHub Atom: entry = release/tag; `SourceURL` = `entry.Link`, content = `entry.Content`
+  (release notes in HTML), the title contains the tag name.
+* Date fallback: `Published` → `Updated` → fetch time (with a note).
+* `RawContent` size limit (e.g., 64 KiB) to protect LLM context and the DB.
 
-## 5. Зависимости
+## 5. Dependencies
 
 * `github.com/mmcdole/gofeed`.
-* `internal/model` — общий тип `UpdateEvent` (принятое решение, см. §9).
+* `internal/model` — shared `UpdateEvent` type (accepted decision, see §9).
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 parser:
   max_content_size: 64KiB
-  strip_html: false   # сохранять ли HTML в RawContent (LLM неплохо читает HTML/markdown)
+  strip_html: false   # whether to keep HTML in RawContent (LLM handles HTML/markdown well)
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Невалидный XML/JSON — ошибка парсинга наверх, фид помечается проблемным после N подряд неудач.
-* Пустой фид (нет записей) — не ошибка, пустой результат.
-* Записи без даты/ссылки — заполнение fallback-значениями, событие не теряется.
-* Нестандартные кодировки — gofeed конвертирует; при неудаче — ошибка с диагностикой.
-* Дубликаты записей внутри одного фида — отдать все, отсечёт `deduplicator`.
+* Invalid XML/JSON — parse error propagated up; feed is marked problematic after N consecutive failures.
+* Empty feed (no entries) — not an error, empty result.
+* Entries without dates/links — filled with fallback values; event is not lost.
+* Non-standard encodings — gofeed converts; on failure — error with diagnostics.
+* Duplicate entries within a single feed — return all; `deduplicator` will filter them out.
 
-## 8. Тестирование
+## 8. Testing
 
-* Golden-файлы: реальные примеры GitHub Atom, RSS 2.0, JSON Feed в `testdata/`.
-* Крайние случаи: пустой фид, битый XML, отсутствующие даты, огромный контент.
+* Golden files: real examples of GitHub Atom, RSS 2.0, JSON Feed in `testdata/`.
+* Edge cases: empty feed, broken XML, missing dates, huge content.
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Место определения `UpdateEvent` — решено (`internal/model`)**: тип нужен сразу
-  нескольким модулям (parser, bus, deduplicator, storage, dispatcher), поэтому живёт
-  в отдельном пакете `internal/model` без зависимостей — ни один модуль не тянет parser
-  ради типа.
-* **Semver-тег GitHub — решено (зона classificator'а)**: парсер не извлекает
-  структурированные поля GitHub; заголовок/контент с именем тега попадают в `RawContent`
-  как есть, интерпретация версии (major/minor/patch, security) — задача LLM-классификации.
+* **Location of `UpdateEvent` — resolved (`internal/model`)**: the type is needed by several
+  modules at once (parser, bus, deduplicator, storage, dispatcher), so it lives in a
+  dedicated `internal/model` package with no dependencies — no module needs to import parser
+  just for the type.
+* **GitHub semver tag — resolved (classificator's responsibility)**: the parser does not extract
+  structured GitHub fields; the title/content with the tag name end up in `RawContent` as-is;
+  interpreting the version (major/minor/patch, security) is the task of LLM classification.

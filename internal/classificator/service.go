@@ -45,7 +45,7 @@ func (s *service) Classify(ctx context.Context, update model.UpdateEvent) (stora
 
 	// 3. Call LLM
 	llmReq := llm.Request{
-		System:      "Ты - эксперт по анализу обновлений программных проектов. Ответь строго JSON.",
+		System:      "You are an expert in analyzing software project updates. Respond strictly in JSON.",
 		User:        promptText,
 		JSONMode:    true,
 		Temperature: 0.1,

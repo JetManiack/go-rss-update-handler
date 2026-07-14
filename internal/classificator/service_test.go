@@ -24,6 +24,8 @@ func (r *stubRepo) InsertNew(ctx context.Context, updates []storage.Update) ([]s
 func (r *stubRepo) SaveVerdict(ctx context.Context, updateID string, v storage.Verdict) error { return nil }
 func (r *stubRepo) LastImportant(ctx context.Context, feedID string, n int) ([]storage.Update, error) { return nil, nil }
 func (r *stubRepo) MarkDispatched(ctx context.Context, updateID string, channel string) error { return nil }
+func (r *stubRepo) IsDispatched(ctx context.Context, updateID string, channel string) (bool, error) { return false, nil }
+func (r *stubRepo) GetVerdict(ctx context.Context, updateID string) (storage.Verdict, error) { return storage.Verdict{}, nil }
 
 func TestClassify(t *testing.T) {
 	svc := New(&mockLLM{}, &mockPrompts{}, &stubRepo{})

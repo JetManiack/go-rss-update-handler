@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,11 +30,11 @@ type FetchResult struct {
 }
 
 type Config struct {
-	Timeout      time.Duration
-	RatePerHost  float64
-	Retries      int
-	BackoffBase  time.Duration
-	UserAgent    string
+	Timeout     time.Duration `koanf:"timeout"`
+	RatePerHost float64       `koanf:"rate_per_host"`
+	Retries     int           `koanf:"retries"`
+	BackoffBase time.Duration `koanf:"backoff_base"`
+	UserAgent   string        `koanf:"user_agent"`
 }
 
 func (c Config) Validate() error {
@@ -91,15 +92,18 @@ func (c *Collector) Fetch(ctx context.Context, ref FeedRef) (FetchResult, error)
 			return FetchResult{}, err
 		}
 
-		res, err := c.doFetch(ctx, ref)
+		res, retryAfter, err := c.doFetch(ctx, ref)
 		if err == nil {
 			return res, nil
 		}
 
 		lastErr = err
-		
-		// Backoff
+
+		// Backoff: honor Retry-After on 429, otherwise exponential backoff.
 		backoff := time.Duration(float64(c.cfg.BackoffBase) * math.Pow(2, float64(i)))
+		if retryAfter > 0 {
+			backoff = retryAfter
+		}
 		select {
 		case <-ctx.Done():
 			return FetchResult{}, ctx.Err()
@@ -109,10 +113,13 @@ func (c *Collector) Fetch(ctx context.Context, ref FeedRef) (FetchResult, error)
 	return FetchResult{}, lastErr
 }
 
-func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, error) {
+// doFetch performs a single fetch attempt. On a 429 response it returns the
+// Retry-After duration (parsed from the header, either as seconds or an
+// HTTP-date), so the caller can honor it instead of the default backoff.
+func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", ref.URL, nil)
 	if err != nil {
-		return FetchResult{}, err
+		return FetchResult{}, 0, err
 	}
 	req.Header.Set("User-Agent", c.cfg.UserAgent)
 
@@ -125,26 +132,25 @@ func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, erro
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return FetchResult{}, err
+		return FetchResult{}, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return FetchResult{NotModified: true, ETag: ref.ETag, LastModified: ref.LastModified, FetchedAt: time.Now()}, nil
+		return FetchResult{NotModified: true, ETag: ref.ETag, LastModified: ref.LastModified, FetchedAt: time.Now()}, 0, nil
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		// Respect Retry-After if provided
-		return FetchResult{}, fmt.Errorf("too many requests")
+		return FetchResult{}, parseRetryAfter(resp.Header.Get("Retry-After")), fmt.Errorf("too many requests")
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return FetchResult{}, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return FetchResult{}, 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return FetchResult{}, err
+		return FetchResult{}, 0, err
 	}
 
 	return FetchResult{
@@ -152,5 +158,26 @@ func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, erro
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
 		FetchedAt:    time.Now(),
-	}, nil
+	}, 0, nil
+}
+
+// parseRetryAfter parses the Retry-After header value, which may be either
+// a number of seconds or an HTTP-date. Returns 0 if the header is absent or
+// cannot be parsed.
+func parseRetryAfter(v string) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }

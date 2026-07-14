@@ -5,20 +5,20 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
 )
 
-// Message представляет собой конверт события в шине.
+// Message is the event envelope on the bus.
 type Message struct {
-	ID       string            // uuid, для трассировки
-	Version  int               // версия схемы конверта
-	Event    model.UpdateEvent // общий тип из internal/model
-	Metadata map[string]string // обогащение (feed_id, verdict, trace_id, ...)
+	ID       string            // uuid, for tracing
+	Version  int               // envelope schema version
+	Event    model.UpdateEvent // shared type from internal/model
+	Metadata map[string]string // enrichment (feed_id, verdict, trace_id, ...)
 }
 
-// Handler — функция-обработчик сообщения.
+// Handler is a message-handler function.
 type Handler func(ctx context.Context, msg Message) error
 
-// Bus — интерфейс шины событий.
+// Bus is the event-bus interface.
 type Bus interface {
 	Publish(ctx context.Context, topic string, msg Message) error
-	// Subscribe блокируется до отмены ctx.
+	// Subscribe blocks until ctx is cancelled.
 	Subscribe(ctx context.Context, topic, group string, handler Handler) error
 }

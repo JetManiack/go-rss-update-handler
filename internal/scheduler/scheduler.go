@@ -6,35 +6,51 @@ import (
 	"time"
 )
 
-// Task — задача, которую планировщик должен выполнять.
+// Task is the job the scheduler must run.
 type Task func(ctx context.Context)
 
-// Scheduler — простой планировщик.
-type Scheduler struct {
-	interval time.Duration
-	jitter   float64 // от 0 до 1, доля интервала
+type Locker interface {
+	Lock(ctx context.Context, key string, ttl time.Duration) (func(), error)
 }
 
-func NewScheduler(interval time.Duration, jitter float64) *Scheduler {
+// Scheduler is a simple scheduler.
+type Scheduler struct {
+	interval time.Duration
+	jitter   float64
+	locker   Locker
+}
+
+func NewScheduler(interval time.Duration, jitter float64, locker Locker) *Scheduler {
 	return &Scheduler{
 		interval: interval,
 		jitter:   jitter,
+		locker:   locker,
 	}
 }
 
-// Start запускает выполнение задачи с заданным интервалом и джиттером.
-func (s *Scheduler) Start(ctx context.Context, task Task) {
+// Start runs the task at the configured interval with jitter.
+func (s *Scheduler) Start(ctx context.Context, key string, task Task) {
 	for {
-		task(ctx)
-		
+		if s.locker != nil {
+			unlock, err := s.locker.Lock(ctx, key, s.interval)
+			if err != nil {
+				// failed to acquire lock, skip this iteration
+			} else {
+				task(ctx)
+				unlock()
+			}
+		} else {
+			task(ctx)
+		}
+
 		delay := s.interval
 		if s.jitter > 0 {
-			// случайное смещение
+			// random offset
 			// #nosec G404
 			jitter := time.Duration((rand.Float64()*2 - 1) * s.jitter * float64(s.interval))
 			delay += jitter
 		}
-		
+
 		select {
 		case <-ctx.Done():
 			return

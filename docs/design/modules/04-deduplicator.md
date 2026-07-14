@@ -1,78 +1,78 @@
 # 04. Deduplicator (`internal/deduplicator`)
 
-## 1. Назначение
+## 1. Purpose
 
-Гарантирует, что каждое обновление обрабатывается ровно один раз. Вычисляет стабильный
-**fingerprint** события и отсекает уже известные обновления до того, как они попадут
-в шину и на дорогую LLM-классификацию.
+Guarantees that each update is processed exactly once. Computes a stable **fingerprint**
+for an event and filters out already-known updates before they enter the bus and reach
+the expensive LLM classification.
 
-## 2. Ответственность и границы
+## 2. Responsibilities and Boundaries
 
-**Делает:**
-* Вычисляет fingerprint события по стабильным полям.
-* Проверяет fingerprint по хранилищу известных обновлений.
-* Регистрирует новые fingerprint'ы (атомарно, чтобы исключить гонки).
+**Does:**
+* Computes an event fingerprint from stable fields.
+* Checks the fingerprint against the store of known updates.
+* Registers new fingerprints (atomically, to prevent races).
 
-**НЕ делает:**
-* Не хранит данные сам — использует `storage` (и опционально Redis-кэш).
-* Не решает вопрос важности обновления.
+**Does NOT:**
+* Does not store data itself — uses `storage` (and optionally a Redis cache).
+* Does not decide whether an update is important.
 
-## 3. Публичный интерфейс
+## 3. Public Interface
 
 ```go
 type Deduplicator interface {
-	// Filter возвращает только новые события, заполняя им Fingerprint
-	// и атомарно регистрируя их как известные.
+	// Filter returns only new events, filling in their Fingerprint
+	// and atomically registering them as known.
 	Filter(ctx context.Context, events []UpdateEvent) ([]UpdateEvent, error)
 }
 
-// Fingerprint вычисляет стабильный отпечаток события.
+// Fingerprint computes a stable fingerprint for an event.
 func Fingerprint(e UpdateEvent) string
 ```
 
-## 4. Внутреннее устройство
+## 4. Internal Design
 
-* **Формула fingerprint:** `sha256(sourceURL + "\n" + guid|link + "\n" + publishedAt.UTC())`,
-  hex-представление. Контент в хэш не включается: правки release notes не должны создавать
-  «новое» событие (иначе — повторные уведомления).
-* **Проверка уникальности:** уникальный индекс по `fingerprint` в таблице `updates` +
-  `INSERT ... ON CONFLICT DO NOTHING` — атомарность даже при нескольких инстансах.
-* **Кэш (опционально, фаза 5):** Redis `SET NX` с TTL как быстрый первый уровень до похода в БД.
+* **Fingerprint formula:** `sha256(sourceURL + "\n" + guid|link + "\n" + publishedAt.UTC())`,
+  hex representation. Content is not included in the hash: edits to release notes must not
+  create a "new" event (otherwise — duplicate notifications).
+* **Uniqueness check:** unique index on `fingerprint` in the `updates` table +
+  `INSERT ... ON CONFLICT DO NOTHING` — atomic even with multiple instances.
+* **Cache (optional, phase 5):** Redis `SET NX` with TTL as a fast first level before hitting the DB.
 
-## 5. Зависимости
+## 5. Dependencies
 
-* `internal/storage` — таблица известных обновлений.
-* Redis (опционально, распределённый режим).
+* `internal/storage` — the known updates table.
+* Redis (optional, distributed mode).
 * stdlib `crypto/sha256`.
 
-## 6. Конфигурация
+## 6. Configuration
 
 ```yaml
 deduplicator:
-  cache_ttl: 720h   # TTL записей в Redis-кэше (если включён)
+  cache_ttl: 720h   # TTL of records in the Redis cache (if enabled)
   use_cache: false
 ```
 
-## 7. Ошибки и крайние случаи
+## 7. Errors and Edge Cases
 
-* Гонка двух инстансов на одном событии — решается уникальным индексом БД, проигравший
-  получает «дубликат» и молча пропускает событие.
-* Изменение `PublishedAt` у существующей записи фида (GitHub так делает при редактировании
-  релиза) — породит новый fingerprint; допустимый компромисс, фиксируется как известное поведение.
-* Недоступность БД — **fail fast (принято)**: типизированная ошибка наверх, приложение
-  логирует ошибку и завершается с ненулевым кодом (БД — обязательная зависимость;
-  в k8s перезапуск делает оркестратор подов, недообработанные фиды будут опрошены заново).
-* Отсутствие guid и link у записи — fallback на хэш контента.
+* Race between two instances on the same event — resolved by the DB unique index; the loser
+  gets a "duplicate" and silently skips the event.
+* `PublishedAt` change on an existing feed entry (GitHub does this when editing a release)
+  — will produce a new fingerprint; acceptable trade-off, documented as known behavior.
+* DB unavailable — **fail fast (accepted)**: typed error propagated up, the application
+  logs the error and exits with a non-zero code (DB is a mandatory dependency;
+  in k8s the pod orchestrator handles restarts, and unprocessed feeds will be polled again).
+* Entry with no guid and no link — fallback to content hash.
 
-## 8. Тестирование
+## 8. Testing
 
-* Unit: стабильность fingerprint (одно событие → один хэш), чувствительность к каждому полю формулы.
-* Интеграционные (SQLite): конкурентная регистрация одного события из нескольких горутин.
+* Unit: fingerprint stability (one event → one hash), sensitivity to each field in the formula.
+* Integration (SQLite): concurrent registration of the same event from multiple goroutines.
 
-## 9. Открытые вопросы и принятые решения
+## 9. Open Questions and Accepted Decisions
 
-* **Политика при недоступности хранилища — решено (fail fast)**: приложение выдаёт
-  ошибку и падает; без БД корректная дедупликация невозможна, а «тихая» деградация
-  ведёт либо к потере событий, либо к дублям уведомлений (см. §7).
-* Нужна ли чистка старых fingerprint'ов (retention) или храним вечно?
-  См. обсуждение retention в [11-storage.md](11-storage.md) §9.
+* **Policy on storage unavailability — resolved (fail fast)**: the application returns
+  an error and crashes; correct deduplication is impossible without the DB, and "silent"
+  degradation leads either to lost events or to duplicate notifications (see §7).
+* Does old fingerprint cleanup (retention) need to happen, or do we store forever?
+  See the retention discussion in [11-storage.md](11-storage.md) §9.
