@@ -128,9 +128,7 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 				return nil
 			}
 			channelIDs := make([]string, len(channels))
-			for i, name := range channels {
-				channelIDs[i] = name
-			}
+			copy(channelIDs, channels)
 			_, err = o.dispatcher.Dispatch(ctx, dispatcher.Notification{
 				Event:   msg.Event,
 				Verdict: verdict,
