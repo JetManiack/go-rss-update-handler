@@ -86,6 +86,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 		return err
 	}
 	metrics.UpdatesNew.Add(float64(len(inserted)))
+	o.logger.Info("feed processed", "feed", feed.URL, "parsed", len(events), "new", len(inserted))
 
 	var pubErrs []error
 	for _, u := range inserted {
@@ -124,6 +125,7 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		o.logger.Debug("classifying update", "id", msg.Event.ID, "url", msg.Event.SourceURL)
 		verdict, err := o.classifier.Classify(ctx, msg.Event, history)
 		if err != nil {
 			return err
@@ -136,6 +138,12 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
+		o.logger.Info("update classified",
+			"url", msg.Event.SourceURL,
+			"important", verdict.Important,
+			"category", verdict.Category,
+			"confidence", verdict.Confidence,
+			"reason", verdict.Reason)
 		if verdict.Important {
 			metrics.Classifications.WithLabelValues("important").Inc()
 			return o.bus.Publish(ctx, bus.TopicUpdatesImportant, msg)
@@ -187,6 +195,7 @@ func (o *Orchestrator) RunDispatcher(ctx context.Context) error {
 				return err
 			}
 		}
+		o.logger.Info("update dispatched", "url", msg.Event.SourceURL, "channels", len(pending))
 		return nil
 	})
 }
