@@ -46,16 +46,17 @@ All phases are implemented following a unified process:
 
 **Output:** `gruh --version` works, environment spins up with one command.
 
-## Phase 1 — Storage and Data Model
+## Phase 1 — Storage and Data Model (completed)
 
 **Goal:** persistence layer that all other modules rely on.
 
-- [ ] `internal/storage`: GORM models (Feed, Update, RawContent, Channel, FeedChannelMapping, Dispatch);
+- [x] `internal/storage`: GORM models (Feed, Update, RawContent, Channel, FeedChannelMapping, Dispatch);
   fingerprint/verdict stored forever, raw content in `raw_contents` with retention policy
-- [ ] Repositories + migrations (AutoMigrate / versioned) — executed automatically
+  (retention job implemented in `retention.go`, wired into the monolith)
+- [x] Repositories + migrations (AutoMigrate / versioned) — executed automatically
   on root command startup (fail fast on error), no separate `migrate` command
-- [ ] PostgreSQL (prod) and SQLite (local/tests) support
-- [ ] DB is the source of truth for feeds/channels/mapping; management is currently done directly in DB
+- [x] PostgreSQL (prod) and SQLite (local/tests) support
+- [x] DB is the source of truth for feeds/channels/mapping; management is currently done directly in DB
   (seed/SQL scripts); management transports (Slack/Telegram bot) — separate step (Phase 7);
   polling intervals in config
 
@@ -147,8 +148,6 @@ All phases are implemented following a unified process:
 - [ ] Digests (aggregating multiple updates into one notification): disabled
   by default, enabled and formed separately for each channel
   (schedule and per-channel template, see [10-dispatcher.md](modules/10-dispatcher.md) §4)
-- [ ] Retention job for `raw_contents` (cleaning up old raw content,
-  see [11-storage.md](modules/11-storage.md) §9)
 - [ ] Additional source types (non-GitHub RSS, changelog pages)
 - [ ] Classification quality evaluation (feedback loop, flagging false positives)
 - [ ] LLM call caching/budgeting

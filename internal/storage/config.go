@@ -12,12 +12,16 @@ type Config struct {
 	RawContentRetention string `koanf:"raw_content_retention"`
 }
 
-// Validate checks that Driver is one of the supported values.
+// Validate checks that Driver is supported and the retention period parses.
 func (c Config) Validate() error {
 	switch c.Driver {
 	case "postgres", "sqlite":
-		return nil
+		// ok
 	default:
 		return fmt.Errorf("storage: invalid driver %q: must be one of \"postgres\" or \"sqlite\"", c.Driver)
 	}
+	if _, err := ParseRetention(c.RawContentRetention); err != nil {
+		return err
+	}
+	return nil
 }

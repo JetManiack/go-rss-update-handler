@@ -5,6 +5,7 @@
 
 storage:
   driver: postgres
+  raw_content_retention: 90d   # raw_contents cleanup period; 0/empty = keep forever
 
 llm:
   base_url: https://vllm.internal:8000/v1

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/jetbrains/go-rss-update-handler/internal/bus"
 	"github.com/jetbrains/go-rss-update-handler/internal/classificator"
@@ -208,10 +209,17 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	ctx, cancel := observability.NotifyShutdown(ctx)
 	defer cancel()
 
-	db, _, err := storage.InitDB(cfg.Storage)
+	db, gormDB, err := storage.InitDB(cfg.Storage)
 	if err != nil {
 		return fmt.Errorf("init db: %w", err)
 	}
+
+	// Periodic raw_contents retention cleanup (no-op when retention is 0).
+	retention, err := storage.ParseRetention(cfg.Storage.RawContentRetention)
+	if err != nil {
+		return fmt.Errorf("parse retention: %w", err)
+	}
+	go storage.StartRetentionJob(ctx, gormDB, retention, time.Hour, logger)
 
 	b := bus.NewMemoryBus()
 	c := collector.NewCollector(cfg.Collector)
