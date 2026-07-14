@@ -92,7 +92,7 @@ func Load(path string) (*Config, error) {
 		"collector.retries":                  3,
 		"collector.backoff_base":             "1s",
 		"collector.user_agent":               "gruh/1.0",
-		"prompt.dir":                         "assets/prompts",
+		"prompt.dir":                         "", // empty = built-in prompts only
 		"classificator.confidence_threshold": 0.5,
 		"classificator.max_format_retries":   2,
 	}

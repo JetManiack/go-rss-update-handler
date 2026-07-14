@@ -107,6 +107,20 @@ user: |
 	}
 }
 
+// A non-existent override directory must be ignored (built-ins only), not fatal.
+func TestManager_MissingOverrideDir(t *testing.T) {
+	m, err := New(filepath.Join(t.TempDir(), "does-not-exist"))
+	if err != nil {
+		t.Fatalf("New with a missing override dir must not fail: %v", err)
+	}
+	if _, _, err := m.Execute(context.Background(), "classify", map[string]any{
+		"Current": map[string]any{"RawContent": "x"},
+		"History": []any{},
+	}); err != nil {
+		t.Fatalf("built-in classify must still work: %v", err)
+	}
+}
+
 // A critical blueprint whose template does not compile is a fatal load error.
 func TestManager_CriticalBrokenTemplate(t *testing.T) {
 	dir := t.TempDir()

@@ -88,6 +88,18 @@ func (m *Manager) loadFS(fsys fs.FS, root string) error {
 }
 
 func (m *Manager) loadDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// A missing override dir is not an error — run on built-ins only.
+			slog.Warn("prompt: override dir does not exist, using built-ins only", "dir", dir)
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("prompt: override path %q is not a directory", dir)
+	}
 	return fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
