@@ -29,12 +29,16 @@ type FetchResult struct {
 	FetchedAt    time.Time
 }
 
+// defaultMaxBodySize caps a feed response body when the config leaves it unset.
+const defaultMaxBodySize int64 = 5 << 20 // 5 MiB
+
 type Config struct {
 	Timeout     time.Duration `koanf:"timeout"`
 	RatePerHost float64       `koanf:"rate_per_host"`
 	Retries     int           `koanf:"retries"`
 	BackoffBase time.Duration `koanf:"backoff_base"`
 	UserAgent   string        `koanf:"user_agent"`
+	MaxBodySize int64         `koanf:"max_body_size"` // 0 = default
 }
 
 func (c Config) Validate() error {
@@ -54,19 +58,25 @@ func (c Config) Validate() error {
 }
 
 type Collector struct {
-	cfg      Config
-	client   *http.Client
-	limiters map[string]*rate.Limiter
-	mu       sync.Mutex
+	cfg         Config
+	client      *http.Client
+	limiters    map[string]*rate.Limiter
+	maxBodySize int64
+	mu          sync.Mutex
 }
 
 func NewCollector(cfg Config) *Collector {
+	maxBody := cfg.MaxBodySize
+	if maxBody <= 0 {
+		maxBody = defaultMaxBodySize
+	}
 	return &Collector{
 		cfg: cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
 		},
-		limiters: make(map[string]*rate.Limiter),
+		limiters:    make(map[string]*rate.Limiter),
+		maxBodySize: maxBody,
 	}
 }
 
@@ -92,12 +102,19 @@ func (c *Collector) Fetch(ctx context.Context, ref FeedRef) (FetchResult, error)
 			return FetchResult{}, err
 		}
 
-		res, retryAfter, err := c.doFetch(ctx, ref)
+		res, retryAfter, retryable, err := c.doFetch(ctx, ref)
 		if err == nil {
 			return res, nil
 		}
-
 		lastErr = err
+
+		// Permanent failures (4xx, oversized body, malformed request) are not retried.
+		if !retryable {
+			return FetchResult{}, err
+		}
+		if i == c.cfg.Retries {
+			break
+		}
 
 		// Backoff: honor Retry-After on 429, otherwise exponential backoff.
 		backoff := time.Duration(float64(c.cfg.BackoffBase) * math.Pow(2, float64(i)))
@@ -113,13 +130,14 @@ func (c *Collector) Fetch(ctx context.Context, ref FeedRef) (FetchResult, error)
 	return FetchResult{}, lastErr
 }
 
-// doFetch performs a single fetch attempt. On a 429 response it returns the
-// Retry-After duration (parsed from the header, either as seconds or an
-// HTTP-date), so the caller can honor it instead of the default backoff.
-func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time.Duration, error) {
+// doFetch performs a single fetch attempt. The returned bool reports whether a
+// non-nil error is retryable (network errors, 5xx and 429 are; 4xx and an
+// oversized body are not). On a 429 response it also returns the Retry-After
+// duration so the caller can honor it instead of the default backoff.
+func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time.Duration, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", ref.URL, nil)
 	if err != nil {
-		return FetchResult{}, 0, err
+		return FetchResult{}, 0, false, err
 	}
 	req.Header.Set("User-Agent", c.cfg.UserAgent)
 
@@ -132,25 +150,29 @@ func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return FetchResult{}, 0, err
+		return FetchResult{}, 0, true, err // network/transport error: retryable
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusNotModified {
-		return FetchResult{NotModified: true, ETag: ref.ETag, LastModified: ref.LastModified, FetchedAt: time.Now()}, 0, nil
+	switch {
+	case resp.StatusCode == http.StatusNotModified:
+		return FetchResult{NotModified: true, ETag: ref.ETag, LastModified: ref.LastModified, FetchedAt: time.Now()}, 0, false, nil
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return FetchResult{}, parseRetryAfter(resp.Header.Get("Retry-After")), true, fmt.Errorf("too many requests")
+	case resp.StatusCode >= 500:
+		return FetchResult{}, 0, true, fmt.Errorf("server error: %d", resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
+		// 4xx (e.g. 404/410/400): permanent — do not retry.
+		return FetchResult{}, 0, false, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return FetchResult{}, parseRetryAfter(resp.Header.Get("Retry-After")), fmt.Errorf("too many requests")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return FetchResult{}, 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
+	// Cap the body: read one extra byte to detect overflow.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBodySize+1))
 	if err != nil {
-		return FetchResult{}, 0, err
+		return FetchResult{}, 0, true, err // read error: retryable
+	}
+	if int64(len(body)) > c.maxBodySize {
+		return FetchResult{}, 0, false, fmt.Errorf("response body exceeds %d bytes", c.maxBodySize)
 	}
 
 	return FetchResult{
@@ -158,7 +180,7 @@ func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
 		FetchedAt:    time.Now(),
-	}, 0, nil
+	}, 0, false, nil
 }
 
 // parseRetryAfter parses the Retry-After header value, which may be either
