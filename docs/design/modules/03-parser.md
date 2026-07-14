@@ -22,7 +22,8 @@ format — a list of `UpdateEvent`. Hides format differences from the rest of th
 
 ```go
 type Parser interface {
-	// Parse parses the raw feed body and returns events in publication order (newest first).
+	// Parse parses the raw feed body and returns events in chronological order (oldest first),
+	// so the pipeline classifies each update against genuinely earlier ones.
 	Parse(ctx context.Context, feedURL string, body []byte) ([]UpdateEvent, error)
 }
 

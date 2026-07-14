@@ -68,9 +68,12 @@ func (p *Parser) Parse(_ context.Context, feedURL string, body []byte) ([]model.
 		})
 	}
 
-	// Return in publication order, newest first.
+	// Return in chronological order (oldest first). The pipeline classifies
+	// updates in this order so each release is compared against genuinely
+	// earlier ones (history-aware comparison); a newest-first order would let a
+	// later release appear as "previous" context for an earlier one.
 	sort.SliceStable(events, func(i, j int) bool {
-		return events[i].PublishedAt.After(events[j].PublishedAt)
+		return events[i].PublishedAt.Before(events[j].PublishedAt)
 	})
 	return events, nil
 }

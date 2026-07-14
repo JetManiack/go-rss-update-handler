@@ -72,7 +72,7 @@ All phases are implemented following a unified process:
   (retry only on network/5xx/429; 4xx are permanent; response body size cap)
 - [x] `internal/model`: common `UpdateEvent` type (decision made, see [03-parser.md](modules/03-parser.md) §9)
 - [x] `internal/parser`: gofeed → unified `UpdateEvent` (feed-URL fallback for link-less entries,
-  newest-first ordering, content size cap)
+  chronological (oldest-first) ordering, content size cap)
 - [x] `internal/deduplicator`: content-independent fingerprint (SourceURL + PublishedAt);
   deduplication enforced atomically by storage (`InsertNew` ON CONFLICT)
 - [x] In-memory `internal/bus` implementation (buffered channels, async delivery;

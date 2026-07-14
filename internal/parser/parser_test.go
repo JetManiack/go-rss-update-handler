@@ -45,14 +45,14 @@ func TestParser_FeedURLFallbackAndOrdering(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if !events[0].PublishedAt.After(events[1].PublishedAt) {
-		t.Errorf("events must be newest-first: %v then %v", events[0].PublishedAt, events[1].PublishedAt)
+	if !events[0].PublishedAt.Before(events[1].PublishedAt) {
+		t.Errorf("events must be oldest-first: %v then %v", events[0].PublishedAt, events[1].PublishedAt)
 	}
-	if events[0].SourceURL != "http://feed.example/atom" {
-		t.Errorf("link-less entry should fall back to feed URL, got %q", events[0].SourceURL)
+	if events[0].SourceURL != "http://example.com/old" {
+		t.Errorf("older entry with a link should keep it, got %q", events[0].SourceURL)
 	}
-	if events[1].SourceURL != "http://example.com/old" {
-		t.Errorf("entry with a link should keep it, got %q", events[1].SourceURL)
+	if events[1].SourceURL != "http://feed.example/atom" {
+		t.Errorf("newer link-less entry should fall back to feed URL, got %q", events[1].SourceURL)
 	}
 }
 
