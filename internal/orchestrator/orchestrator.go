@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/jetbrains/go-rss-update-handler/internal/bus"
@@ -88,6 +89,12 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 	}
 	metrics.UpdatesNew.Add(float64(len(inserted)))
 	o.logger.Info("feed processed", "feed", feed.URL, "parsed", len(events), "new", len(inserted))
+
+	// Publish (and therefore classify) oldest-first, so each update is compared
+	// against genuinely earlier ones when building classification history.
+	sort.SliceStable(inserted, func(i, j int) bool {
+		return inserted[i].PublishedAt.Before(inserted[j].PublishedAt)
+	})
 
 	var pubErrs []error
 	for _, u := range inserted {

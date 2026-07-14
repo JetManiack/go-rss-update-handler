@@ -198,3 +198,69 @@ func TestOrchestrator_RunWorker_ClassifiesAndSavesVerdict(t *testing.T) {
 		t.Errorf("expected confidence 0.8, got %v", important[0].VerdictConfidence)
 	}
 }
+
+// recordingBus captures the order of published updates.new events.
+type recordingBus struct {
+	published []time.Time
+}
+
+func (b *recordingBus) Publish(_ context.Context, topic string, msg bus.Message) error {
+	if topic == bus.TopicUpdatesNew {
+		b.published = append(b.published, msg.Event.PublishedAt)
+	}
+	return nil
+}
+
+func (b *recordingBus) Subscribe(ctx context.Context, _, _ string, _ bus.Handler) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// New updates must be published (and hence classified) oldest-first, regardless
+// of the order they appear in the feed.
+func TestOrchestrator_ProcessFeed_PublishesOldestFirst(t *testing.T) {
+	const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>t</title>
+  <item><title>b</title><link>http://e/b</link><pubDate>Wed, 01 Jan 2025 00:00:00 GMT</pubDate></item>
+  <item><title>a</title><link>http://e/a</link><pubDate>Sun, 01 Jan 2023 00:00:00 GMT</pubDate></item>
+  <item><title>c</title><link>http://e/c</link><pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate></item>
+</channel></rss>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(feed))
+	}))
+	defer server.Close()
+
+	store, db, err := storage.InitDB(storage.Config{
+		Driver:       "sqlite",
+		DSN:          filepath.Join(t.TempDir(), "order.db"),
+		MaxOpenConns: 5,
+	})
+	if err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	feedRow := storage.Feed{ID: "f1", URL: server.URL, Active: true, CreatedAt: time.Now()}
+	if err := db.Create(&feedRow).Error; err != nil {
+		t.Fatalf("seed feed: %v", err)
+	}
+
+	rb := &recordingBus{}
+	c := collector.NewCollector(collector.Config{
+		Timeout: time.Second, RatePerHost: 100, Retries: 1, BackoffBase: time.Millisecond, UserAgent: "test",
+	})
+	orch := NewOrchestrator(c, parser.NewParser(), deduplicator.NewDeduplicator(), rb,
+		store.Feeds(), store.Updates(), nil, nil, slog.Default())
+
+	if err := orch.ProcessFeed(context.Background(), feedRow); err != nil {
+		t.Fatalf("ProcessFeed: %v", err)
+	}
+
+	if len(rb.published) != 3 {
+		t.Fatalf("published %d updates, want 3", len(rb.published))
+	}
+	for i := 1; i < len(rb.published); i++ {
+		if rb.published[i].Before(rb.published[i-1]) {
+			t.Errorf("updates must be published oldest-first: %v before %v", rb.published[i], rb.published[i-1])
+		}
+	}
+}
