@@ -132,12 +132,7 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := o.updates.SaveVerdict(ctx, msg.Event.ID, storage.Verdict{
-			Important:  verdict.Important,
-			Category:   verdict.Category,
-			Confidence: verdict.Confidence,
-			Reason:     verdict.Reason,
-		}); err != nil {
+		if err := o.updates.SaveVerdict(ctx, msg.Event.ID, verdict); err != nil {
 			return err
 		}
 		o.logger.Info("update classified",

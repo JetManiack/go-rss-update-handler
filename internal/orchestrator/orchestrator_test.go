@@ -25,7 +25,7 @@ import (
 type fakeLLM struct{}
 
 func (f *fakeLLM) Complete(_ context.Context, _ llm.Request) (llm.Response, error) {
-	return llm.Response{Content: `{"important": true, "category": "release", "confidence": 0.8, "reason": "test"}`}, nil
+	return llm.Response{Content: `{"title": "NodeExporter v1 — test release", "important": true, "category": "release", "confidence": 0.8, "reason": "test"}`}, nil
 }
 
 // fakePrompts is a test double avoiding disk/registry dependencies for the prompt template.
@@ -190,6 +190,9 @@ func TestOrchestrator_RunWorker_ClassifiesAndSavesVerdict(t *testing.T) {
 	}
 	if important[0].VerdictCategory != "release" {
 		t.Errorf("expected category 'release', got %q", important[0].VerdictCategory)
+	}
+	if important[0].Title != "NodeExporter v1 — test release" {
+		t.Errorf("LLM-generated title not applied to the update: %q", important[0].Title)
 	}
 	if important[0].VerdictConfidence != 0.8 {
 		t.Errorf("expected confidence 0.8, got %v", important[0].VerdictConfidence)
