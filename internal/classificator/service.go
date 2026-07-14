@@ -35,6 +35,7 @@ func New(llmClient llm.Client, prompts PromptManager, cfg Config) Service {
 
 // verdictJSON is the raw shape the LLM is asked to produce.
 type verdictJSON struct {
+	Title      string  `json:"title"`
 	Important  bool    `json:"important"`
 	Category   string  `json:"category"`
 	Confidence float64 `json:"confidence"`
@@ -100,6 +101,7 @@ func (s *service) applyRules(v verdictJSON) storage.Verdict {
 		Category:   v.Category,
 		Confidence: v.Confidence,
 		Reason:     v.Reason,
+		Title:      v.Title,
 	}
 }
 

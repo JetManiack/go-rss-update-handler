@@ -15,6 +15,7 @@ type Verdict struct {
 	Category   string
 	Confidence float64
 	Reason     string
+	Title      string // LLM-generated short title (project, version, summary)
 }
 
 // Store is the unified storage layer interface.
@@ -138,13 +139,18 @@ func boolPtr(b bool) *bool {
 
 func (r *updateRepo) SaveVerdict(ctx context.Context, updateID string, v Verdict) error {
 	now := time.Now()
-	return r.db.WithContext(ctx).Model(&Update{}).Where("id = ?", updateID).Updates(map[string]any{
+	fields := map[string]any{
 		"verdict_important":  boolPtr(v.Important),
 		"verdict_category":   v.Category,
 		"verdict_confidence": v.Confidence,
 		"verdict_reason":     v.Reason,
 		"classified_at":      &now,
-	}).Error
+	}
+	// Replace the feed title with the richer LLM-generated one when present.
+	if v.Title != "" {
+		fields["title"] = v.Title
+	}
+	return r.db.WithContext(ctx).Model(&Update{}).Where("id = ?", updateID).Updates(fields).Error
 }
 
 func (r *updateRepo) GetVerdict(ctx context.Context, updateID string) (Verdict, error) {

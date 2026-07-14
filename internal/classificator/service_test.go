@@ -32,7 +32,7 @@ func newSvc(content string) Service {
 }
 
 func TestClassify_ImportantAboveThreshold(t *testing.T) {
-	svc := newSvc(`{"important": true, "category": "release", "confidence": 0.9, "reason": "big"}`)
+	svc := newSvc(`{"title": "Foo v1.0 — big new features", "important": true, "category": "release", "confidence": 0.9, "reason": "big"}`)
 	v, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: "1"}, nil)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
@@ -42,6 +42,9 @@ func TestClassify_ImportantAboveThreshold(t *testing.T) {
 	}
 	if v.Category != "release" {
 		t.Errorf("category = %q, want release", v.Category)
+	}
+	if v.Title != "Foo v1.0 — big new features" {
+		t.Errorf("title = %q", v.Title)
 	}
 }
 
