@@ -31,8 +31,8 @@ func (f *fakeLLM) Complete(_ context.Context, _ llm.Request) (llm.Response, erro
 // fakePrompts is a test double avoiding disk/registry dependencies for the prompt template.
 type fakePrompts struct{}
 
-func (f *fakePrompts) Render(_ string, _ any) (string, error) {
-	return "prompt", nil
+func (f *fakePrompts) Execute(_ context.Context, _ string, _ any) (string, string, error) {
+	return "system", "user", nil
 }
 
 const feedXML = `<?xml version="1.0" encoding="UTF-8"?>

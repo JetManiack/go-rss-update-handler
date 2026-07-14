@@ -1,0 +1,20 @@
+name: classify
+version: "2.0.0"
+critical: true
+description: "Classify a project update against the feed's recent important updates"
+
+system: |
+  You are an expert at analyzing software-project updates.
+  Your task is to classify each update as important (requires attention) or noise.
+  Always respond strictly as JSON, with no extra text.
+user: |
+  Assess the importance of the project update.
+
+  ## Current update
+  {{ .Current.RawContent }}
+
+  ## Most recent important updates (for comparison)
+  {{ range .History }}- {{ .Event.PublishedAt }}: {{ .Verdict.Reason }}
+  {{ else }}No important-update history.
+  {{ end }}
+  Respond strictly as JSON: {"important": bool, "category": string, "confidence": float, "reason": string}

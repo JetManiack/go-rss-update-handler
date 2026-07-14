@@ -74,8 +74,9 @@ All phases are implemented following a unified process:
 **Goal:** separating important updates from noise.
 
 - [x] `internal/llm`: OpenAI-compatible client (timeouts, retry, token accounting)
-- [x] `internal/prompt`: built-in prompts via `go:embed`, override from user directory, Go templates;
-  YAML prompt header (`name`/`version`/`critical`/`description`, see [09-prompt.md](modules/09-prompt.md) §4)
+- [x] `internal/prompt`: built-in blueprints via `go:embed`, override from user directory by `name`;
+  single YAML file per prompt with `system`/`user` Go templates and metadata
+  (`name`/`version`/`critical`/`description`, see [09-prompt.md](modules/09-prompt.md) §4)
 - [x] `internal/classificator`: importance verdict; context = current update + 2 last important;
   confidence threshold 0.5, security patches always important (rule on top of LLM)
 - [x] Storing verdicts and history of important updates in `storage`

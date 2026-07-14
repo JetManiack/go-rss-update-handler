@@ -7,7 +7,6 @@ import (
 
 	"github.com/jetbrains/go-rss-update-handler/internal/llm"
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
-	"github.com/jetbrains/go-rss-update-handler/internal/prompt"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
@@ -15,13 +14,18 @@ type Service interface {
 	Classify(ctx context.Context, update model.UpdateEvent) (storage.Verdict, error)
 }
 
+// PromptManager renders a named prompt blueprint into system and user messages.
+type PromptManager interface {
+	Execute(ctx context.Context, name string, data any) (system, user string, err error)
+}
+
 type service struct {
 	llm     llm.Client
-	prompts prompt.Registry
+	prompts PromptManager
 	repo    storage.UpdateRepo
 }
 
-func New(llm llm.Client, prompts prompt.Registry, repo storage.UpdateRepo) Service {
+func New(llm llm.Client, prompts PromptManager, repo storage.UpdateRepo) Service {
 	return &service{llm: llm, prompts: prompts, repo: repo}
 }
 
@@ -33,20 +37,20 @@ func (s *service) Classify(ctx context.Context, update model.UpdateEvent) (stora
 		return storage.Verdict{}, fmt.Errorf("fetch history: %w", err)
 	}
 
-	// 2. Render prompt
+	// 2. Render prompt (system + user) from the classify blueprint
 	data := map[string]any{
 		"Current": update,
 		"History": history,
 	}
-	promptText, err := s.prompts.Render("classify", data)
+	system, user, err := s.prompts.Execute(ctx, "classify", data)
 	if err != nil {
 		return storage.Verdict{}, fmt.Errorf("render prompt: %w", err)
 	}
 
 	// 3. Call LLM
 	llmReq := llm.Request{
-		System:      "You are an expert in analyzing software project updates. Respond strictly in JSON.",
-		User:        promptText,
+		System:      system,
+		User:        user,
 		JSONMode:    true,
 		Temperature: 0.1,
 	}

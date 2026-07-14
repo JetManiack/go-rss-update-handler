@@ -10,22 +10,37 @@ import (
 )
 
 type mockLLM struct{}
+
 func (m *mockLLM) Complete(ctx context.Context, req llm.Request) (llm.Response, error) {
 	return llm.Response{Content: `{"important": true, "category": "security", "confidence": 0.9, "reason": "important"}`}, nil
 }
 
 type mockPrompts struct{}
-func (m *mockPrompts) Render(name string, data any) (string, error) {
-	return "prompt content", nil
+
+func (m *mockPrompts) Execute(ctx context.Context, name string, data any) (string, string, error) {
+	return "system content", "user content", nil
 }
 
 type stubRepo struct{}
-func (r *stubRepo) InsertNew(ctx context.Context, updates []storage.Update) ([]storage.Update, error) { return nil, nil }
-func (r *stubRepo) SaveVerdict(ctx context.Context, updateID string, v storage.Verdict) error { return nil }
-func (r *stubRepo) LastImportant(ctx context.Context, feedID string, n int) ([]storage.Update, error) { return nil, nil }
-func (r *stubRepo) MarkDispatched(ctx context.Context, updateID string, channel string) error { return nil }
-func (r *stubRepo) IsDispatched(ctx context.Context, updateID string, channel string) (bool, error) { return false, nil }
-func (r *stubRepo) GetVerdict(ctx context.Context, updateID string) (storage.Verdict, error) { return storage.Verdict{}, nil }
+
+func (r *stubRepo) InsertNew(ctx context.Context, updates []storage.Update) ([]storage.Update, error) {
+	return nil, nil
+}
+func (r *stubRepo) SaveVerdict(ctx context.Context, updateID string, v storage.Verdict) error {
+	return nil
+}
+func (r *stubRepo) LastImportant(ctx context.Context, feedID string, n int) ([]storage.Update, error) {
+	return nil, nil
+}
+func (r *stubRepo) MarkDispatched(ctx context.Context, updateID string, channel string) error {
+	return nil
+}
+func (r *stubRepo) IsDispatched(ctx context.Context, updateID string, channel string) (bool, error) {
+	return false, nil
+}
+func (r *stubRepo) GetVerdict(ctx context.Context, updateID string) (storage.Verdict, error) {
+	return storage.Verdict{}, nil
+}
 
 func TestClassify(t *testing.T) {
 	svc := New(&mockLLM{}, &mockPrompts{}, &stubRepo{})
