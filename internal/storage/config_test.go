@@ -3,7 +3,7 @@ package storage_test
 import (
 	"testing"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 func TestConfig_Validate(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 //go:embed index.html go-ruh.png

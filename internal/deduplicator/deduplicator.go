@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
 )
 
 // Deduplicator computes a content-independent fingerprint for an event.

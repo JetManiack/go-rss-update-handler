@@ -1,4 +1,4 @@
-module github.com/jetbrains/go-rss-update-handler
+module github.com/JetManiack/go-rss-update-handler
 
 go 1.26.5
 

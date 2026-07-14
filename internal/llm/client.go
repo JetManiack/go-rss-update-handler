@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/metrics"
+	"github.com/JetManiack/go-rss-update-handler/internal/metrics"
 )
 
 // Request defines the input for the LLM.

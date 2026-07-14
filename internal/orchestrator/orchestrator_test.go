@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/bus"
-	"github.com/jetbrains/go-rss-update-handler/internal/classificator"
-	"github.com/jetbrains/go-rss-update-handler/internal/collector"
-	"github.com/jetbrains/go-rss-update-handler/internal/deduplicator"
-	"github.com/jetbrains/go-rss-update-handler/internal/dispatcher"
-	"github.com/jetbrains/go-rss-update-handler/internal/llm"
-	"github.com/jetbrains/go-rss-update-handler/internal/parser"
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/bus"
+	"github.com/JetManiack/go-rss-update-handler/internal/classificator"
+	"github.com/JetManiack/go-rss-update-handler/internal/collector"
+	"github.com/JetManiack/go-rss-update-handler/internal/deduplicator"
+	"github.com/JetManiack/go-rss-update-handler/internal/dispatcher"
+	"github.com/JetManiack/go-rss-update-handler/internal/llm"
+	"github.com/JetManiack/go-rss-update-handler/internal/parser"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 	"gorm.io/gorm"
 )
 

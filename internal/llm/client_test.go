@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/metrics"
+	"github.com/JetManiack/go-rss-update-handler/internal/metrics"
 )
 
 func TestComplete_RetryWithBody(t *testing.T) {

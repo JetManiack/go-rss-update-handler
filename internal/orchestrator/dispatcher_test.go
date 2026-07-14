@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/dispatcher"
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/dispatcher"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 type mockNotifier struct {

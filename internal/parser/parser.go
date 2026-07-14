@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
 	"github.com/mmcdole/gofeed"
 )
 

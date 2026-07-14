@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/llm"
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/llm"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
 )
 
 type mockLLM struct {

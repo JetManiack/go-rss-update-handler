@@ -14,11 +14,11 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	koanf "github.com/knadh/koanf/v2"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/classificator"
-	"github.com/jetbrains/go-rss-update-handler/internal/collector"
-	"github.com/jetbrains/go-rss-update-handler/internal/llm"
-	"github.com/jetbrains/go-rss-update-handler/internal/observability"
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/classificator"
+	"github.com/JetManiack/go-rss-update-handler/internal/collector"
+	"github.com/JetManiack/go-rss-update-handler/internal/llm"
+	"github.com/JetManiack/go-rss-update-handler/internal/observability"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 type SchedulerConfig struct {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/llm"
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/llm"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 // Service classifies an update into an importance verdict. History (the recent

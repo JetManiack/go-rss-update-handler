@@ -2,7 +2,7 @@ package bus
 
 import (
 	"context"
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
 	"testing"
 	"time"
 )

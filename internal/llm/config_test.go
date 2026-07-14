@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/llm"
+	"github.com/JetManiack/go-rss-update-handler/internal/llm"
 )
 
 func TestConfig_Validate(t *testing.T) {

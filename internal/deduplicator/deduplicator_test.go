@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
 )
 
 func TestDeduplicator_Fingerprint(t *testing.T) {

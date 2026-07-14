@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 func TestHandler_APIUpdates(t *testing.T) {

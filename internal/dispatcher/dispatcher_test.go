@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetbrains/go-rss-update-handler/internal/model"
-	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/JetManiack/go-rss-update-handler/internal/model"
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 func TestDispatcher(t *testing.T) {
