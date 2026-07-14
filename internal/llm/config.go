@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// TLSConfig holds TLS options for the LLM HTTP client.
+type TLSConfig struct {
+	// Insecure disables server certificate verification. Use only for
+	// self-signed or local endpoints (e.g. a local vLLM over https).
+	Insecure bool `koanf:"insecure"`
+}
+
 // Config holds settings for the LLM HTTP client.
 type Config struct {
 	BaseURL       string        `koanf:"base_url"`
@@ -17,6 +24,7 @@ type Config struct {
 	MaxRetries    int           `koanf:"max_retries"`
 	MaxConcurrent int           `koanf:"max_concurrent"`
 	Temperature   float64       `koanf:"temperature"`
+	TLS           TLSConfig     `koanf:"tls"`
 }
 
 // Validate checks that BaseURL is a valid absolute http/https URL and that

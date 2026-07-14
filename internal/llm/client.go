@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,13 +52,18 @@ func New(cfg Config) Client {
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+	httpClient := &http.Client{Timeout: cfg.Timeout}
+	if cfg.TLS.Insecure {
+		// Opt-in only: skip certificate verification for self-signed/local endpoints.
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 -- gated behind llm.tls.insecure
+		}
+	}
 	return &client{
-		cfg: cfg,
-		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
-		},
-		tracer: otel.Tracer("llm"),
-		sem:    make(chan struct{}, concurrency),
+		cfg:        cfg,
+		httpClient: httpClient,
+		tracer:     otel.Tracer("llm"),
+		sem:        make(chan struct{}, concurrency),
 	}
 }
 

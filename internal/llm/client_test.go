@@ -110,6 +110,26 @@ func TestComplete_RecordsMetrics(t *testing.T) {
 	}
 }
 
+func TestComplete_InsecureTLS(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],"model":"test"}`))
+	}))
+	defer server.Close()
+
+	// A default (verifying) client must reject the server's self-signed cert.
+	secure := New(Config{BaseURL: server.URL, Model: "test", MaxRetries: 0})
+	if _, err := secure.Complete(context.Background(), Request{}); err == nil {
+		t.Fatal("expected a TLS verification failure without llm.tls.insecure")
+	}
+
+	// With insecure verification disabled, the request succeeds.
+	insecure := New(Config{BaseURL: server.URL, Model: "test", MaxRetries: 0, TLS: TLSConfig{Insecure: true}})
+	if _, err := insecure.Complete(context.Background(), Request{}); err != nil {
+		t.Fatalf("insecure client should connect to the self-signed server: %v", err)
+	}
+}
+
 func TestComplete_DoesNotRetry4xx(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
