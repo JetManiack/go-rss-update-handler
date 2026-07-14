@@ -25,6 +25,7 @@ type Update struct {
 	ID                string      `gorm:"primaryKey;type:varchar(36)"`
 	FeedID            string      `gorm:"index;index:idx_updates_feed_important_published,priority:1;not null"`
 	Fingerprint       string      `gorm:"uniqueIndex;not null;type:text"`
+	Title             string      `gorm:"type:text"`
 	SourceURL         string      `gorm:"type:text"`
 	PublishedAt       time.Time   `gorm:"not null;index:idx_updates_feed_important_published,priority:3"`
 	CreatedAt         time.Time   `gorm:"not null"`

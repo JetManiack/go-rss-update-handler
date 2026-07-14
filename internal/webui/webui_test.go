@@ -18,6 +18,7 @@ func TestHandler_APIUpdates(t *testing.T) {
 		return []storage.Update{{
 			ID:                "1",
 			FeedID:            "f1",
+			Title:             "v1.2.3",
 			SourceURL:         "http://example.com/1",
 			PublishedAt:       time.Now(),
 			VerdictImportant:  &imp,
@@ -43,6 +44,9 @@ func TestHandler_APIUpdates(t *testing.T) {
 	}
 	if got[0]["content"] != "release body" {
 		t.Errorf("content = %v", got[0]["content"])
+	}
+	if got[0]["title"] != "v1.2.3" {
+		t.Errorf("title = %v", got[0]["title"])
 	}
 	if got[0]["category"] != "security" {
 		t.Errorf("category = %v", got[0]["category"])

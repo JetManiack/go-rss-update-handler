@@ -23,6 +23,7 @@ type FetchFunc func(ctx context.Context, limit int) ([]storage.Update, error)
 type updateDTO struct {
 	ID           string     `json:"id"`
 	FeedID       string     `json:"feed_id"`
+	Title        string     `json:"title"`
 	SourceURL    string     `json:"source_url"`
 	PublishedAt  time.Time  `json:"published_at"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -56,6 +57,7 @@ func Handler(fetch FetchFunc) http.Handler {
 			d := updateDTO{
 				ID:           u.ID,
 				FeedID:       u.FeedID,
+				Title:        u.Title,
 				SourceURL:    u.SourceURL,
 				PublishedAt:  u.PublishedAt,
 				CreatedAt:    u.CreatedAt,

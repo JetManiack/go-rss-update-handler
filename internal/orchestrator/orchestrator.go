@@ -75,6 +75,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 		updates = append(updates, storage.Update{
 			FeedID:      feed.ID,
 			Fingerprint: e.Fingerprint,
+			Title:       e.Title,
 			SourceURL:   e.SourceURL,
 			PublishedAt: e.PublishedAt,
 			RawContent:  &storage.RawContent{Content: e.RawContent},
@@ -96,6 +97,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 			Event: model.UpdateEvent{
 				ID:          u.ID,
 				FeedID:      u.FeedID,
+				Title:       u.Title,
 				SourceURL:   u.SourceURL,
 				RawContent:  u.RawContent.Content,
 				PublishedAt: u.PublishedAt,

@@ -39,7 +39,7 @@
   .conf { color: #8b93a1; }
   .conf::before { content: "conf "; color: #5b6472; }
 
-  .src { display: block; padding: .5rem .8rem 0; color: #6cb6ff; text-decoration: none; word-break: break-all; }
+  .src { display: block; padding: .5rem .8rem 0; color: #6cb6ff; text-decoration: none; word-break: break-word; font-size: 14px; font-weight: 600; }
   .src:hover { text-decoration: underline; }
   .reason { padding: .35rem .8rem .1rem; color: #adb4c0; }
   .reason::before { content: "reason: "; color: #5b6472; }
@@ -77,6 +77,12 @@ function fmtTime(t) {
   const d = new Date(t);
   return isNaN(d) ? '' : d.toISOString().replace('T', ' ').slice(0, 16);
 }
+function midTrunc(s, max) {
+  s = s || '';
+  if (s.length <= max) return s;
+  const keep = max - 1, head = Math.ceil(keep / 2), tail = Math.floor(keep / 2);
+  return s.slice(0, head) + '…' + s.slice(s.length - tail);
+}
 function state(u) {
   if (u.classified_at == null) return 'pend';
   return u.important ? 'imp' : 'noise';
@@ -90,7 +96,8 @@ function fill(el, u) {
   el.className = 'card ' + st;
   const badge = '<span class="badge ' + st + '">' + (st === 'imp' ? 'important' : st === 'noise' ? 'noise' : 'pending') + '</span>';
   const cat = u.category ? '<span class="cat">' + esc(u.category) + '</span>' : '';
-  const conf = (u.classified_at != null && typeof u.confidence === 'number') ? '<span class="conf">' + u.confidence.toFixed(2) + '</span>' : '';
+  const conf = (u.classified_at != null && typeof u.confidence === 'number') ? '<span class="conf">' + Math.round(u.confidence * 100) + '%</span>' : '';
+  const label = (u.title && u.title.trim()) ? u.title.trim() : midTrunc(u.source_url, 72);
   const reason = u.reason ? '<div class="reason">' + esc(u.reason) + '</div>' : '';
   const release = u.content
     ? '<pre class="release">' + esc(u.content) + '</pre>'
@@ -98,7 +105,7 @@ function fill(el, u) {
   el.innerHTML =
     '<div class="head">' + badge + cat + conf +
       '<span class="spacer"></span><time>' + esc(fmtTime(u.published_at)) + ' UTC</time></div>' +
-    '<a class="src" href="' + esc(u.source_url) + '" target="_blank" rel="noopener">' + esc(u.source_url) + '</a>' +
+    '<a class="src" href="' + esc(u.source_url) + '" title="' + esc(u.source_url) + '" target="_blank" rel="noopener">' + esc(label) + '</a>' +
     reason + release;
 }
 
