@@ -11,11 +11,22 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
+
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
 //go:embed index.html
 var static embed.FS
+
+// htmlPolicy sanitizes untrusted feed HTML before it is rendered in the UI:
+// it keeps common formatting and strips scripts, event handlers, etc.
+var htmlPolicy = func() *bluemonday.Policy {
+	p := bluemonday.UGCPolicy()
+	p.AddTargetBlankToFullyQualifiedLinks(true)
+	p.RequireNoFollowOnLinks(true)
+	return p
+}()
 
 // FetchFunc returns the most recent updates (with raw content) for display.
 type FetchFunc func(ctx context.Context, limit int) ([]storage.Update, error)
@@ -68,7 +79,8 @@ func Handler(fetch FetchFunc) http.Handler {
 				ClassifiedAt: u.ClassifiedAt,
 			}
 			if u.RawContent != nil {
-				d.Content = u.RawContent.Content
+				// Feed content is untrusted HTML — sanitize before it reaches the browser.
+				d.Content = htmlPolicy.Sanitize(u.RawContent.Content)
 			}
 			out = append(out, d)
 		}

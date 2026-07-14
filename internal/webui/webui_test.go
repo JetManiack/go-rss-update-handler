@@ -56,6 +56,30 @@ func TestHandler_APIUpdates(t *testing.T) {
 	}
 }
 
+func TestHandler_SanitizesContent(t *testing.T) {
+	fetch := func(_ context.Context, _ int) ([]storage.Update, error) {
+		return []storage.Update{{
+			ID:         "1",
+			SourceURL:  "http://example.com/1",
+			RawContent: &storage.RawContent{Content: `<script>alert(1)</script><p>hello <b>world</b></p>`},
+		}}, nil
+	}
+	rec := httptest.NewRecorder()
+	Handler(fetch).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/updates", nil))
+
+	var got []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	content, _ := got[0]["content"].(string)
+	if strings.Contains(strings.ToLower(content), "<script") {
+		t.Errorf("script tag not sanitized: %q", content)
+	}
+	if !strings.Contains(content, "<p>hello") {
+		t.Errorf("safe markup should be preserved: %q", content)
+	}
+}
+
 func TestHandler_ServesPage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Handler(func(context.Context, int) ([]storage.Update, error) { return nil, nil }).

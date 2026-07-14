@@ -44,11 +44,26 @@
   .reason { padding: .35rem .8rem .1rem; color: #adb4c0; }
   .reason::before { content: "reason: "; color: #5b6472; }
 
-  pre.release {
+  .release {
     margin: .55rem .8rem .8rem; padding: .65rem .85rem; background: #0a0d12; border: 1px solid #1e2530;
-    border-radius: 6px; white-space: pre-wrap; word-break: break-word;
-    max-height: 22rem; overflow: auto; color: #c3c9d3; font-size: 12.5px;
+    border-radius: 6px; max-height: 26rem; overflow: auto; color: #c3c9d3; font-size: 13px;
+    word-break: break-word;
   }
+  .release > :first-child { margin-top: 0; }
+  .release > :last-child { margin-bottom: 0; }
+  .release p, .release ul, .release ol, .release blockquote, .release pre, .release table,
+  .release h1, .release h2, .release h3, .release h4 { margin: .5rem 0; }
+  .release a { color: #6cb6ff; }
+  .release ul, .release ol { padding-left: 1.4rem; }
+  .release h1, .release h2, .release h3, .release h4 { font-size: 1.02em; font-weight: 600; color: #e6e9ee; }
+  .release code { background: #161b22; padding: .05rem .3rem; border-radius: 4px; font-size: .92em; }
+  .release pre { background: #161b22; padding: .6rem .75rem; border-radius: 6px; overflow: auto; }
+  .release pre code { background: none; padding: 0; }
+  .release img { max-width: 100%; height: auto; border-radius: 4px; }
+  .release blockquote { border-left: 3px solid #2b3340; margin-left: 0; padding-left: .8rem; color: #9aa4b2; }
+  .release hr { border: none; border-top: 1px solid #1e2530; }
+  .release table { border-collapse: collapse; }
+  .release th, .release td { border: 1px solid #1e2530; padding: .2rem .5rem; }
   .release.empty { color: #5b6472; font-style: italic; border-style: dashed; }
 
   .empty-state { padding: 3rem 1rem; text-align: center; color: #8b93a1; }
@@ -100,7 +115,7 @@ function fill(el, u) {
   const label = (u.title && u.title.trim()) ? u.title.trim() : midTrunc(u.source_url, 72);
   const reason = u.reason ? '<div class="reason">' + esc(u.reason) + '</div>' : '';
   const release = u.content
-    ? '<pre class="release">' + esc(u.content) + '</pre>'
+    ? '<div class="release">' + u.content + '</div>' // server-sanitized HTML (bluemonday)
     : '<div class="release empty">no release text</div>';
   el.innerHTML =
     '<div class="head">' + badge + cat + conf +
