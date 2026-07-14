@@ -34,8 +34,13 @@ func TestRecentUpdates(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d updates, want 2", len(got))
 	}
-	// Newest first (by created_at); both were created just now, so assert content
-	// is preloaded rather than ordering of same-instant rows.
+	// Ordered by publication time, newest first.
+	if !got[0].PublishedAt.After(got[1].PublishedAt) {
+		t.Errorf("updates must be ordered by published_at DESC: %v then %v", got[0].PublishedAt, got[1].PublishedAt)
+	}
+	if got[0].SourceURL != "u2" {
+		t.Errorf("newest-published update should be first, got %q", got[0].SourceURL)
+	}
 	for _, u := range got {
 		if u.RawContent == nil || u.RawContent.Content == "" {
 			t.Errorf("raw content not preloaded for %s", u.SourceURL)
