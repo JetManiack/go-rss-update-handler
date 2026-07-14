@@ -242,8 +242,8 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	if cfg.WebUI.Addr != "" {
 		go func() {
 			logger.Info("starting web UI", "addr", cfg.WebUI.Addr)
-			err := webui.Serve(ctx, cfg.WebUI.Addr, func(ctx context.Context, limit int) ([]storage.Update, error) {
-				return storage.RecentUpdates(ctx, gormDB, limit)
+			err := webui.Serve(ctx, cfg.WebUI.Addr, func(ctx context.Context, q webui.Query) ([]storage.Update, int64, error) {
+				return storage.ListUpdates(ctx, gormDB, q.Category, q.Importance, q.Limit, q.Offset)
 			})
 			if err != nil {
 				logger.Error("web UI server failed", "err", err)

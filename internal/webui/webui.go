@@ -28,8 +28,17 @@ var htmlPolicy = func() *bluemonday.Policy {
 	return p
 }()
 
-// FetchFunc returns the most recent updates (with raw content) for display.
-type FetchFunc func(ctx context.Context, limit int) ([]storage.Update, error)
+// Query describes a page request for the updates feed.
+type Query struct {
+	Limit      int
+	Offset     int
+	Category   string // "" = any
+	Importance string // "", "important", "noise", "pending"
+}
+
+// FetchFunc returns a page of updates (with raw content) and the total number of
+// matching rows.
+type FetchFunc func(ctx context.Context, q Query) ([]storage.Update, int64, error)
 
 type updateDTO struct {
 	ID           string     `json:"id"`
@@ -52,13 +61,13 @@ func Handler(fetch FetchFunc) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/updates", func(w http.ResponseWriter, r *http.Request) {
-		limit := 100
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-			}
+		q := Query{
+			Limit:      atoiDefault(r.URL.Query().Get("limit"), 50),
+			Offset:     atoiDefault(r.URL.Query().Get("offset"), 0),
+			Category:   r.URL.Query().Get("category"),
+			Importance: r.URL.Query().Get("importance"),
 		}
-		updates, err := fetch(r.Context(), limit)
+		updates, total, err := fetch(r.Context(), q)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -85,7 +94,12 @@ func Handler(fetch FetchFunc) http.Handler {
 			out = append(out, d)
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(out)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items":  out,
+			"total":  total,
+			"limit":  q.Limit,
+			"offset": q.Offset,
+		})
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +117,16 @@ func Handler(fetch FetchFunc) http.Handler {
 	})
 
 	return mux
+}
+
+func atoiDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+		return n
+	}
+	return def
 }
 
 // Serve runs the web UI server on addr until ctx is cancelled.

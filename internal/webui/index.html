@@ -12,13 +12,24 @@
     background: #0e1116; color: #d7dae0;
   }
   header {
-    position: sticky; top: 0; z-index: 5; display: flex; align-items: baseline; gap: 1rem;
-    padding: .7rem 1rem; background: #151a21ee; backdrop-filter: blur(6px);
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+    padding: .6rem 1rem; background: #151a21ee; backdrop-filter: blur(6px);
     border-bottom: 1px solid #262d38;
   }
   header h1 { margin: 0; font-size: 15px; font-weight: 600; color: #fff; }
-  header .meta { color: #8b93a1; font-size: 12px; }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; display: inline-block; margin-right: .35rem; vertical-align: baseline; }
+  header .spacer { flex: 1; }
+  header label { color: #8b93a1; font-size: 12px; }
+  header select {
+    background: #0e1116; color: #d7dae0; border: 1px solid #262d38; border-radius: 6px;
+    padding: .18rem .35rem; font: inherit; font-size: 12px;
+  }
+  header button {
+    background: #1b222c; color: #d7dae0; border: 1px solid #262d38; border-radius: 6px;
+    padding: .12rem .55rem; cursor: pointer; font: inherit;
+  }
+  header button:disabled { opacity: .4; cursor: default; }
+  header .meta { color: #8b93a1; font-size: 12px; white-space: nowrap; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; display: inline-block; margin-right: .35rem; }
 
   main { max-width: 1100px; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 
@@ -72,17 +83,48 @@
 <body>
 <header>
   <h1>gruh · updates</h1>
+  <label>category
+    <select id="f-category">
+      <option value="">all</option>
+      <option value="security">security</option>
+      <option value="breaking">breaking</option>
+      <option value="feature">feature</option>
+      <option value="fix">fix</option>
+      <option value="noise">noise</option>
+      <option value="unclassified">unclassified</option>
+    </select>
+  </label>
+  <label>importance
+    <select id="f-importance">
+      <option value="">all</option>
+      <option value="important">important</option>
+      <option value="noise">noise</option>
+      <option value="pending">pending</option>
+    </select>
+  </label>
+  <span class="spacer"></span>
+  <button id="prev" title="previous page">‹</button>
+  <span id="pager" class="meta">—</span>
+  <button id="next" title="next page">›</button>
   <span class="meta"><span class="dot" id="dot"></span><span id="status">connecting…</span></span>
 </header>
 <main id="cards"></main>
-<div class="empty-state" id="empty" hidden>No updates yet.</div>
+<div class="empty-state" id="empty" hidden>No updates match.</div>
 
 <script>
 const container = document.getElementById('cards');
 const emptyEl = document.getElementById('empty');
 const statusEl = document.getElementById('status');
 const dotEl = document.getElementById('dot');
+const pagerEl = document.getElementById('pager');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const catSel = document.getElementById('f-category');
+const impSel = document.getElementById('f-importance');
+
 const cards = new Map(); // id -> { el, sig }
+const pageSize = 50;
+const state = { offset: 0, category: '', importance: '' };
 
 function esc(s) {
   return (s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -98,16 +140,16 @@ function midTrunc(s, max) {
   const keep = max - 1, head = Math.ceil(keep / 2), tail = Math.floor(keep / 2);
   return s.slice(0, head) + '…' + s.slice(s.length - tail);
 }
-function state(u) {
+function stateOf(u) {
   if (u.classified_at == null) return 'pend';
   return u.important ? 'imp' : 'noise';
 }
 function sigOf(u) {
-  return [state(u), u.category, u.confidence, (u.content || '').length].join('|');
+  return [stateOf(u), u.title, u.category, u.confidence, (u.content || '').length].join('|');
 }
 
 function fill(el, u) {
-  const st = state(u);
+  const st = stateOf(u);
   el.className = 'card ' + st;
   const badge = '<span class="badge ' + st + '">' + (st === 'imp' ? 'important' : st === 'noise' ? 'noise' : 'pending') + '</span>';
   const cat = u.category ? '<span class="cat">' + esc(u.category) + '</span>' : '';
@@ -124,10 +166,10 @@ function fill(el, u) {
     reason + release;
 }
 
-function render(data) {
-  emptyEl.hidden = data.length !== 0;
+function render(items) {
+  emptyEl.hidden = items.length !== 0;
   const seen = new Set();
-  for (const u of data) {
+  for (const u of items) {
     seen.add(u.id);
     let rec = cards.get(u.id);
     const sig = sigOf(u);
@@ -137,29 +179,55 @@ function render(data) {
       rec = { el, sig };
       cards.set(u.id, rec);
     } else if (rec.sig !== sig) {
-      fill(rec.el, u); // only rewrite a card when its verdict/content actually changed
+      fill(rec.el, u);
       rec.sig = sig;
     }
-    container.appendChild(rec.el); // move into data order without resetting untouched cards
+    container.appendChild(rec.el); // keep data order without disturbing untouched cards
   }
   for (const [id, rec] of cards) {
     if (!seen.has(id)) { rec.el.remove(); cards.delete(id); }
   }
 }
 
+function updatePager(total) {
+  const start = total === 0 ? 0 : state.offset + 1;
+  const end = Math.min(state.offset + pageSize, total);
+  pagerEl.textContent = start + '–' + end + ' of ' + total;
+  prevBtn.disabled = state.offset <= 0;
+  nextBtn.disabled = state.offset + pageSize >= total;
+}
+
+function buildURL() {
+  const p = new URLSearchParams({ limit: String(pageSize), offset: String(state.offset) });
+  if (state.category) p.set('category', state.category);
+  if (state.importance) p.set('importance', state.importance);
+  return '/api/updates?' + p.toString();
+}
+
+function resetView() {
+  cards.clear();
+  container.innerHTML = '';
+}
+
 async function refresh() {
   try {
-    const res = await fetch('/api/updates?limit=200', { cache: 'no-store' });
+    const res = await fetch(buildURL(), { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    render(data);
+    render(data.items || []);
+    updatePager(data.total || 0);
     dotEl.style.background = '#3fb950';
-    statusEl.textContent = data.length + ' updates · refreshed ' + new Date().toLocaleTimeString();
+    statusEl.textContent = (data.total || 0) + ' total · ' + new Date().toLocaleTimeString();
   } catch (e) {
     dotEl.style.background = '#f85149';
     statusEl.textContent = 'error: ' + e.message;
   }
 }
+
+catSel.addEventListener('change', () => { state.category = catSel.value; state.offset = 0; resetView(); refresh(); });
+impSel.addEventListener('change', () => { state.importance = impSel.value; state.offset = 0; resetView(); refresh(); });
+prevBtn.addEventListener('click', () => { if (state.offset > 0) { state.offset = Math.max(0, state.offset - pageSize); resetView(); refresh(); } });
+nextBtn.addEventListener('click', () => { state.offset += pageSize; resetView(); refresh(); });
 
 refresh();
 setInterval(refresh, 2000);
