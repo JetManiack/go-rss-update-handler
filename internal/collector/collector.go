@@ -134,7 +134,7 @@ func (c *Collector) doFetch(ctx context.Context, ref FeedRef) (FetchResult, time
 	if err != nil {
 		return FetchResult{}, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
 		return FetchResult{NotModified: true, ETag: ref.ETag, LastModified: ref.LastModified, FetchedAt: time.Now()}, 0, nil

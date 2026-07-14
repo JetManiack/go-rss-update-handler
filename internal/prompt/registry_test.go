@@ -10,19 +10,19 @@ func TestRegistry_Render(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	reg, err := New(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	type Data struct {
 		Current struct{ RawContent string }
 		History []any
 		Verdict struct{ Reason string }
 	}
-	
+
 	data := Data{
 		Current: struct{ RawContent string }{RawContent: "some content"},
 		History: nil,

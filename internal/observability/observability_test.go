@@ -27,7 +27,7 @@ func TestShutdown(t *testing.T) {
 	// Simulate signal
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 	}()
 
 	select {

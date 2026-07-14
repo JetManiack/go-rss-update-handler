@@ -19,10 +19,12 @@ build:
 test:
 	go test ./...
 
-## lint: run golangci-lint (installed automatically if missing)
+## lint: run golangci-lint v2 (installed automatically if missing)
+# Built with the project's Go toolchain: golangci-lint refuses to run when it was
+# built with a Go version older than the module's target (see go.mod).
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+		GOTOOLCHAIN=$(shell go env GOVERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	golangci-lint run ./...
 
 ## gosec: run gosec (code vulnerability scan, installed automatically if missing)

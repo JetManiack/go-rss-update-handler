@@ -52,7 +52,7 @@ func (n *WebhookNotifier) Send(ctx context.Context, notif Notification) error {
 	if err != nil {
 		return fmt.Errorf("do webhook request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook returned status: %d", resp.StatusCode)
