@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -81,6 +82,7 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 		return err
 	}
 
+	var pubErrs []error
 	for _, u := range inserted {
 		msg := bus.Message{
 			ID:      uuid.New().String(),
@@ -94,16 +96,23 @@ func (o *Orchestrator) ProcessFeed(ctx context.Context, feed storage.Feed) error
 				Fingerprint: u.Fingerprint,
 			},
 		}
-		if err := o.bus.Publish(ctx, "updates.new", msg); err != nil {
-			o.logger.Error("failed to publish update", "err", err)
+		if err := o.bus.Publish(ctx, bus.TopicUpdatesNew, msg); err != nil {
+			o.logger.Error("failed to publish new update", "id", u.ID, "err", err)
+			pubErrs = append(pubErrs, err)
 		}
 	}
 
-	return nil
+	// Surface publish failures instead of silently dropping them: an inserted
+	// update that was never published would otherwise be deduplicated forever
+	// and never classified.
+	return errors.Join(pubErrs...)
 }
 
+// RunWorker consumes new updates, classifies them, persists the verdict, and
+// publishes important ones for delivery. It does NOT dispatch itself — delivery
+// (and its idempotency) is the dispatcher role's job (RunDispatcher).
 func (o *Orchestrator) RunWorker(ctx context.Context) error {
-	return o.bus.Subscribe(ctx, "updates.new", "classificator", func(ctx context.Context, msg bus.Message) error {
+	return o.bus.Subscribe(ctx, bus.TopicUpdatesNew, "classificator", func(ctx context.Context, msg bus.Message) error {
 		verdict, err := o.classifier.Classify(ctx, msg.Event)
 		if err != nil {
 			return err
@@ -117,24 +126,51 @@ func (o *Orchestrator) RunWorker(ctx context.Context) error {
 			return err
 		}
 		if verdict.Important {
-			if err := o.bus.Publish(ctx, "updates.classified", msg); err != nil {
-				return err
-			}
-			channels, err := o.feeds.ChannelsFor(ctx, msg.Event.FeedID)
+			return o.bus.Publish(ctx, bus.TopicUpdatesImportant, msg)
+		}
+		return nil
+	})
+}
+
+// RunDispatcher consumes important updates and delivers them to each mapped
+// channel exactly once, guarding against duplicate sends via the dispatches
+// table (IsDispatched / MarkDispatched).
+func (o *Orchestrator) RunDispatcher(ctx context.Context) error {
+	return o.bus.Subscribe(ctx, bus.TopicUpdatesImportant, "dispatcher", func(ctx context.Context, msg bus.Message) error {
+		verdict, err := o.updates.GetVerdict(ctx, msg.Event.ID)
+		if err != nil {
+			return err
+		}
+		channels, err := o.feeds.ChannelsFor(ctx, msg.Event.FeedID)
+		if err != nil {
+			return err
+		}
+
+		var pending []string
+		for _, ch := range channels {
+			dispatched, err := o.updates.IsDispatched(ctx, msg.Event.ID, ch)
 			if err != nil {
 				return err
 			}
-			if len(channels) == 0 {
-				return nil
+			if !dispatched {
+				pending = append(pending, ch)
 			}
-			channelIDs := make([]string, len(channels))
-			copy(channelIDs, channels)
-			_, err = o.dispatcher.Dispatch(ctx, dispatcher.Notification{
-				Event:   msg.Event,
-				Verdict: verdict,
-				FeedURL: msg.Event.SourceURL,
-			}, channelIDs)
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+
+		if _, err := o.dispatcher.Dispatch(ctx, dispatcher.Notification{
+			Event:   msg.Event,
+			Verdict: verdict,
+			FeedURL: msg.Event.SourceURL,
+		}, pending); err != nil {
 			return err
+		}
+		for _, ch := range pending {
+			if err := o.updates.MarkDispatched(ctx, msg.Event.ID, ch); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

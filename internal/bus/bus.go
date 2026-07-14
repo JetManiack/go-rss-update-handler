@@ -2,7 +2,17 @@ package bus
 
 import (
 	"context"
+
 	"github.com/jetbrains/go-rss-update-handler/internal/model"
+)
+
+// Topic names for the update pipeline. Use these constants instead of inline
+// string literals so a typo cannot silently create a dead topic.
+const (
+	// TopicUpdatesNew carries freshly collected, deduplicated updates.
+	TopicUpdatesNew = "updates.new"
+	// TopicUpdatesImportant carries updates the classifier deemed important.
+	TopicUpdatesImportant = "updates.important"
 )
 
 // Message is the event envelope on the bus.

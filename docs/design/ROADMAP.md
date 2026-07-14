@@ -62,19 +62,28 @@ All phases are implemented following a unified process:
 
 **Documents:** [11-storage.md](modules/11-storage.md), [13-config.md](modules/13-config.md)
 
-## Phase 2 — Collection and Parsing (vertical slice without LLM)
+## Phase 2 — Collection and Parsing (vertical slice without LLM) (completed)
 
 **Goal:** the system polls feeds and stores new unique updates in the DB.
 
-- [ ] `internal/scheduler`: interval scheduler with jitter
-- [ ] `internal/collector`: HTTP client with `ETag` / `If-Modified-Since`, rate limiting, retry/backoff
-- [ ] `internal/model`: common `UpdateEvent` type (decision made, see [03-parser.md](modules/03-parser.md) §9)
-- [ ] `internal/parser`: gofeed → unified `UpdateEvent` (semver tag not extracted — this is the classificator's zone)
-- [ ] `internal/deduplicator`: fingerprinting, deduplication
-- [ ] In-memory `internal/bus` implementation (bus interface is fixed here;
-  topic constants `updates.new` / `updates.classified`, schema version in `Message` envelope,
+- [x] `internal/scheduler`: interval scheduler with jitter
+  (per-feed adaptive polling from [01-scheduler.md](modules/01-scheduler.md) §4 is deferred — see note below)
+- [x] `internal/collector`: HTTP client with `ETag` / `If-Modified-Since`, rate limiting, retry/backoff
+  (retry only on network/5xx/429; 4xx are permanent; response body size cap)
+- [x] `internal/model`: common `UpdateEvent` type (decision made, see [03-parser.md](modules/03-parser.md) §9)
+- [x] `internal/parser`: gofeed → unified `UpdateEvent` (feed-URL fallback for link-less entries,
+  newest-first ordering, content size cap)
+- [x] `internal/deduplicator`: content-independent fingerprint (SourceURL + PublishedAt);
+  deduplication enforced atomically by storage (`InsertNew` ON CONFLICT)
+- [x] In-memory `internal/bus` implementation (buffered channels, async delivery;
+  topic constants `updates.new` / `updates.important`, schema version in `Message` envelope,
   see [05-bus.md](modules/05-bus.md) §9)
-- [ ] Basic `internal/orchestrator`: pipeline step linking
+- [x] `internal/orchestrator`: pipeline wiring; monolith `run()` polls feeds, classifies, and
+  dispatches; worker and dispatcher roles are separated (no double-send)
+
+> Deferred to a follow-up: per-feed timers with adaptive back-off (01-scheduler §4). The current
+> scheduler polls all active feeds on a single global interval with jitter, which is sufficient for
+> the monolith and integration/load testing.
 
 **Documents:** [01-scheduler.md](modules/01-scheduler.md), [02-collector.md](modules/02-collector.md),
 [03-parser.md](modules/03-parser.md), [04-deduplicator.md](modules/04-deduplicator.md),

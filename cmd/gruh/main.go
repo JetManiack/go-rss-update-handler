@@ -125,53 +125,13 @@ func runWorker(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runDispatcher(ctx context.Context, cmd *cli.Command) error {
-	cfg, _, db, b, err := initEnv(cmd)
+	cfg, logger, db, b, err := initEnv(cmd)
 	if err != nil {
 		return err
 	}
 	disp := initDispatcher(cfg.Dispatcher)
-
-	return b.Subscribe(ctx, "updates.classified", "dispatcher-group", func(ctx context.Context, msg bus.Message) error {
-		verdict, err := db.Updates().GetVerdict(ctx, msg.Event.ID)
-		if err != nil {
-			return err
-		}
-
-		channels, err := db.Feeds().ChannelsFor(ctx, msg.Event.FeedID)
-		if err != nil {
-			return err
-		}
-
-		var pendingChannels []string
-		for _, ch := range channels {
-			dispatched, err := db.Updates().IsDispatched(ctx, msg.Event.ID, ch)
-			if err != nil {
-				return err
-			}
-			if !dispatched {
-				pendingChannels = append(pendingChannels, ch)
-			}
-		}
-
-		if len(pendingChannels) == 0 {
-			return nil
-		}
-
-		_, err = disp.Dispatch(ctx, dispatcher.Notification{
-			Event:   msg.Event,
-			Verdict: verdict,
-			FeedURL: msg.Event.SourceURL,
-		}, pendingChannels)
-
-		if err == nil {
-			for _, ch := range pendingChannels {
-				if err := db.Updates().MarkDispatched(ctx, msg.Event.ID, ch); err != nil {
-					return err
-				}
-			}
-		}
-		return err
-	})
+	orch := orchestrator.NewOrchestrator(nil, nil, nil, b, db.Feeds(), db.Updates(), nil, disp, logger)
+	return orch.RunDispatcher(ctx)
 }
 
 func initEnv(cmd *cli.Command) (*config.Config, *slog.Logger, storage.Store, bus.Bus, error) {
@@ -231,15 +191,41 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("new prompt registry: %w", err)
 	}
 	classificatorSvc := classificator.New(llmClient, prompts, db.Updates())
-	disp := dispatcher.NewService(nil) // TODO: Implement Notifier loading from config
+	disp := initDispatcher(cfg.Dispatcher)
 	orch := orchestrator.NewOrchestrator(c, p, d, b, db.Feeds(), db.Updates(), classificatorSvc, disp, logger)
 
-	// Run worker
+	// Classification worker.
 	go func() {
 		if err := orch.RunWorker(ctx); err != nil {
 			logger.Error("orchestrator worker failed", "err", err)
 		}
 	}()
+
+	// Notification dispatcher.
+	go func() {
+		if err := orch.RunDispatcher(ctx); err != nil {
+			logger.Error("orchestrator dispatcher failed", "err", err)
+		}
+	}()
+
+	// Collection scheduler: poll all active feeds on the configured interval.
+	jitterFrac := 0.0
+	if cfg.Scheduler.Interval > 0 {
+		jitterFrac = float64(cfg.Scheduler.Jitter) / float64(cfg.Scheduler.Interval)
+	}
+	sched := scheduler.NewScheduler(cfg.Scheduler.Interval, jitterFrac, nil)
+	go sched.Start(ctx, "collector", func(ctx context.Context) {
+		feeds, err := db.Feeds().List(ctx)
+		if err != nil {
+			logger.Error("failed to list feeds", "err", err)
+			return
+		}
+		for _, f := range feeds {
+			if err := orch.ProcessFeed(ctx, f); err != nil {
+				logger.Error("failed to process feed", "feed", f.URL, "err", err)
+			}
+		}
+	})
 
 	// Start metrics server
 	if cfg.Observability.Metrics != "" {

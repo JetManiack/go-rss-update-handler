@@ -9,7 +9,7 @@ for independent scaling in k8s.
 ## 2. Responsibilities and Boundaries
 
 **Does:**
-* Publish/subscribe on typed topics (`updates.new`, `updates.classified`, ...).
+* Publish/subscribe on typed topics (`updates.new`, `updates.important`, ...).
 * At-least-once delivery guarantee (in Redis mode: ack, redelivery, DLQ).
 * Event serialization + transfer of enrichment metadata (values from `context.Context`
   are explicitly packed into the message envelope — the context itself is not serialized).
@@ -91,7 +91,7 @@ bus:
 * **Topic list and versioning — resolved (base set + version in envelope)**:
   there are three topics — at the pipeline stage boundaries:
   * `updates.new` — new event after deduplication (collector side → worker);
-  * `updates.classified` — event with "important" verdict (worker → dispatcher);
+  * `updates.important` — event with "important" verdict (worker → dispatcher);
   * `<topic>.dlq` — DLQ for each topic (see §4).
   The list consists of constants in the `bus` package (not inline strings at call sites). Versioning —
   the `Version` field in the `Message` envelope (not in the topic name): consumers read

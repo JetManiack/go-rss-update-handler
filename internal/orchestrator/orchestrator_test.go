@@ -168,11 +168,22 @@ func TestOrchestrator_RunWorker_ClassifiesAndSavesVerdict(t *testing.T) {
 		t.Fatalf("ProcessFeed failed: %v", err)
 	}
 
-	// MemoryBus.Publish invokes subscribed handlers synchronously, so by the
-	// time ProcessFeed returns the verdict should already be persisted.
-	important, err := f.store.Updates().LastImportant(ctx, f.feed.ID, 10)
-	if err != nil {
-		t.Fatalf("LastImportant failed: %v", err)
+	// The in-memory bus delivers asynchronously, so poll until the worker has
+	// classified the update and persisted its verdict.
+	var (
+		important []storage.Update
+		err       error
+	)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		important, err = f.store.Updates().LastImportant(ctx, f.feed.ID, 10)
+		if err != nil {
+			t.Fatalf("LastImportant failed: %v", err)
+		}
+		if len(important) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if len(important) != 1 {
 		t.Fatalf("expected 1 important update after classification, got %d", len(important))
