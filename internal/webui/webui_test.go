@@ -104,6 +104,21 @@ func TestHandler_SanitizesContent(t *testing.T) {
 	}
 }
 
+func TestHandler_ServesIcon(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Handler(func(context.Context, Query) ([]storage.Update, int64, error) { return nil, 0, nil }).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/go-ruh.png", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("content-type = %q, want image/png", ct)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("icon body is empty")
+	}
+}
+
 func TestHandler_ServesPage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Handler(func(context.Context, Query) ([]storage.Update, int64, error) { return nil, 0, nil }).

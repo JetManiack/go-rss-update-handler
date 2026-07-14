@@ -16,7 +16,7 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
 )
 
-//go:embed index.html
+//go:embed index.html go-ruh.png
 var static embed.FS
 
 // htmlPolicy sanitizes untrusted feed HTML before it is rendered in the UI:
@@ -100,6 +100,17 @@ func Handler(fetch FetchFunc) http.Handler {
 			"limit":  q.Limit,
 			"offset": q.Offset,
 		})
+	})
+
+	mux.HandleFunc("/go-ruh.png", func(w http.ResponseWriter, _ *http.Request) {
+		b, err := static.ReadFile("go-ruh.png")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(b)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
