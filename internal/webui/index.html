@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gruh · updates</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #0e1116; color: #d7dae0;
+  }
+  header {
+    position: sticky; top: 0; display: flex; align-items: baseline; gap: 1rem;
+    padding: .7rem 1rem; background: #151a21; border-bottom: 1px solid #262d38;
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; color: #fff; }
+  header .meta { color: #8b93a1; font-size: 12px; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; display: inline-block; margin-right: .35rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: .45rem .7rem; border-bottom: 1px solid #1e2530; vertical-align: top; }
+  th { position: sticky; top: 49px; background: #11161d; color: #8b93a1; font-weight: 600; font-size: 12px; }
+  tr.row:hover { background: #141a22; }
+  td.url { max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.url a { color: #6cb6ff; text-decoration: none; }
+  .badge { display: inline-block; padding: .05rem .45rem; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .imp { background: #26311f; color: #7ee787; }
+  .noise { background: #2a2f38; color: #9aa4b2; }
+  .pend { background: #33290f; color: #e3b341; }
+  .cat { color: #d2a8ff; }
+  .num { color: #8b93a1; }
+  details { margin: 0; }
+  details > summary { cursor: pointer; color: #8b93a1; list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary { color: #d7dae0; }
+  pre.content {
+    margin: .5rem 0 0; padding: .6rem .8rem; background: #0a0d12; border: 1px solid #1e2530;
+    border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto;
+    color: #c3c9d3;
+  }
+  .empty { padding: 2rem 1rem; color: #8b93a1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>gruh · updates</h1>
+  <span class="meta"><span class="dot" id="dot"></span><span id="status">connecting…</span></span>
+</header>
+<table>
+  <thead>
+    <tr>
+      <th>Published (UTC)</th>
+      <th>Source</th>
+      <th>Verdict</th>
+      <th>Conf.</th>
+      <th>Category</th>
+      <th>Reason</th>
+      <th>Release text</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="empty" id="empty" hidden>No updates yet.</div>
+
+<script>
+const rowsEl = document.getElementById('rows');
+const emptyEl = document.getElementById('empty');
+const statusEl = document.getElementById('status');
+const dotEl = document.getElementById('dot');
+
+function esc(s) {
+  return (s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtTime(t) {
+  if (!t) return '';
+  const d = new Date(t);
+  return isNaN(d) ? '' : d.toISOString().replace('T', ' ').slice(0, 19);
+}
+function verdictBadge(u) {
+  if (u.classified_at == null) return '<span class="badge pend">pending</span>';
+  return u.important ? '<span class="badge imp">important</span>' : '<span class="badge noise">noise</span>';
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/api/updates?limit=200', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    render(data);
+    dotEl.style.background = '#3fb950';
+    statusEl.textContent = data.length + ' updates · refreshed ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    dotEl.style.background = '#f85149';
+    statusEl.textContent = 'error: ' + e.message;
+  }
+}
+
+function render(data) {
+  emptyEl.hidden = data.length !== 0;
+  rowsEl.innerHTML = data.map(u => {
+    const conf = (u.classified_at && typeof u.confidence === 'number') ? u.confidence.toFixed(2) : '';
+    const content = u.content
+      ? '<details><summary>view (' + u.content.length + ' chars)</summary><pre class="content">' + esc(u.content) + '</pre></details>'
+      : '<span class="num">—</span>';
+    return '<tr class="row">' +
+      '<td class="num">' + esc(fmtTime(u.published_at)) + '</td>' +
+      '<td class="url"><a href="' + esc(u.source_url) + '" target="_blank" rel="noopener">' + esc(u.source_url) + '</a></td>' +
+      '<td>' + verdictBadge(u) + '</td>' +
+      '<td class="num">' + conf + '</td>' +
+      '<td class="cat">' + esc(u.category) + '</td>' +
+      '<td>' + esc(u.reason) + '</td>' +
+      '<td>' + content + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

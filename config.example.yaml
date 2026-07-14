@@ -18,3 +18,6 @@ observability:
     level: info
     format: json
   metrics: ":9090"   # address for the /metrics + /healthz + /readyz server ("" disables it)
+
+webui:
+  addr: ":8080"      # read-only web UI of the updates table ("" disables it)

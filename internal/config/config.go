@@ -30,6 +30,10 @@ type PromptConfig struct {
 	Dir string `koanf:"dir"`
 }
 
+type WebUIConfig struct {
+	Addr string `koanf:"addr"` // "" disables the web UI
+}
+
 type DispatcherConfig struct {
 	Slack    map[string]string            `koanf:"slack"`
 	Telegram map[string]map[string]string `koanf:"telegram"`
@@ -45,6 +49,7 @@ type Config struct {
 	Prompt        PromptConfig         `koanf:"prompt"`
 	Dispatcher    DispatcherConfig     `koanf:"dispatcher"`
 	Classificator classificator.Config `koanf:"classificator"`
+	WebUI         WebUIConfig          `koanf:"webui"`
 	Feeds         []string             `koanf:"feeds"`
 }
 

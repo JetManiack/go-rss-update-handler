@@ -21,6 +21,7 @@ import (
 	"github.com/jetbrains/go-rss-update-handler/internal/prompt"
 	"github.com/jetbrains/go-rss-update-handler/internal/scheduler"
 	"github.com/jetbrains/go-rss-update-handler/internal/storage"
+	"github.com/jetbrains/go-rss-update-handler/internal/webui"
 	"github.com/urfave/cli/v3"
 )
 
@@ -233,6 +234,19 @@ func run(ctx context.Context, cmd *cli.Command) error {
 			logger.Info("starting metrics server", "addr", cfg.Observability.Metrics)
 			if err := observability.StartMetricsServer(ctx, cfg.Observability.Metrics); err != nil {
 				logger.Error("metrics server failed", "err", err)
+			}
+		}()
+	}
+
+	// Start read-only web UI
+	if cfg.WebUI.Addr != "" {
+		go func() {
+			logger.Info("starting web UI", "addr", cfg.WebUI.Addr)
+			err := webui.Serve(ctx, cfg.WebUI.Addr, func(ctx context.Context, limit int) ([]storage.Update, error) {
+				return storage.RecentUpdates(ctx, gormDB, limit)
+			})
+			if err != nil {
+				logger.Error("web UI server failed", "err", err)
 			}
 		}()
 	}
