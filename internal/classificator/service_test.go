@@ -48,6 +48,23 @@ func TestClassify_ImportantAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestClassify_ToleratesCodeFencedJSON(t *testing.T) {
+	svc := newSvc("```json\n{\"title\": \"X v1 — new stuff\", \"important\": true, \"category\": \"feature\", \"confidence\": 0.8, \"reason\": \"r\"}\n```")
+	v, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: "1"}, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if !v.Important {
+		t.Error("expected important=true from code-fenced JSON")
+	}
+	if v.Category != "feature" {
+		t.Errorf("category = %q, want feature", v.Category)
+	}
+	if v.Title != "X v1 — new stuff" {
+		t.Errorf("title = %q", v.Title)
+	}
+}
+
 func TestClassify_LowConfidenceIsNoise(t *testing.T) {
 	svc := newSvc(`{"important": true, "category": "release", "confidence": 0.3, "reason": "meh"}`)
 	v, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: "1"}, nil)

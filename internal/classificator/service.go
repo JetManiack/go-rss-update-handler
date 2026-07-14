@@ -107,11 +107,23 @@ func (s *service) applyRules(v verdictJSON) storage.Verdict {
 
 func parseVerdict(content string) (verdictJSON, error) {
 	var v verdictJSON
-	if err := json.Unmarshal([]byte(content), &v); err != nil {
+	if err := json.Unmarshal([]byte(extractJSONObject(content)), &v); err != nil {
 		return verdictJSON{}, fmt.Errorf("invalid JSON: %w", err)
 	}
 	if v.Confidence < 0 || v.Confidence > 1 {
 		return verdictJSON{}, fmt.Errorf("confidence %v out of range [0,1]", v.Confidence)
 	}
 	return v, nil
+}
+
+// extractJSONObject returns the substring from the first '{' to the last '}'.
+// Some models wrap their JSON in a markdown code fence (```json … ```) or add
+// stray prose despite JSON mode; this tolerates that.
+func extractJSONObject(s string) string {
+	start := strings.IndexByte(s, '{')
+	end := strings.LastIndexByte(s, '}')
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return s
 }
