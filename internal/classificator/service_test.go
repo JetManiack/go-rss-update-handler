@@ -2,6 +2,7 @@ package classificator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -12,9 +13,11 @@ import (
 type mockLLM struct {
 	content string
 	err     error
+	lastReq llm.Request
 }
 
-func (m *mockLLM) Complete(_ context.Context, _ llm.Request) (llm.Response, error) {
+func (m *mockLLM) Complete(_ context.Context, req llm.Request) (llm.Response, error) {
+	m.lastReq = req
 	if m.err != nil {
 		return llm.Response{}, m.err
 	}
@@ -25,6 +28,10 @@ type mockPrompts struct{}
 
 func (m *mockPrompts) Execute(_ context.Context, _ string, _ any) (string, string, error) {
 	return "system", "user", nil
+}
+
+func (m *mockPrompts) Schema(_ string) (json.RawMessage, string, bool) {
+	return json.RawMessage(`{"type":"object"}`), "classify_verdict", true
 }
 
 func newSvc(content string) Service {
@@ -97,6 +104,27 @@ func TestClassify_FormatRetryThenFail(t *testing.T) {
 	}
 	if v.Important {
 		t.Error("a failed classification must not be important")
+	}
+}
+
+func TestClassify_ThreadsSchemaIntoRequest(t *testing.T) {
+	m := &mockLLM{content: `{"title":"t","important":false,"category":"noise","confidence":0.9,"reason":"r"}`}
+	svc := New(m, &mockPrompts{}, Config{ConfidenceThreshold: 0.5, MaxFormatRetries: 2})
+	if _, err := svc.Classify(context.Background(), model.UpdateEvent{FeedID: "1"}, nil); err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if m.lastReq.SchemaName != "classify_verdict" {
+		t.Errorf("SchemaName = %q, want %q", m.lastReq.SchemaName, "classify_verdict")
+	}
+	if m.lastReq.Schema == nil {
+		t.Fatal("the prompt schema must be threaded into the LLM request")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(m.lastReq.Schema, &got); err != nil {
+		t.Fatalf("threaded schema is not valid JSON: %v", err)
+	}
+	if got["type"] != "object" {
+		t.Errorf("schema not threaded verbatim: %v", got)
 	}
 }
 

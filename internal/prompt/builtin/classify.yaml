@@ -1,7 +1,33 @@
 name: classify
-version: "2.2.0"
+version: "2.4.0"
 critical: true
 description: "Classify a project update against the feed's recent important updates"
+
+# Structured-output contract. When the provider supports OpenAI-compatible
+# json_schema, the classificator sends this as response_format (strict), so the
+# model can only emit a conforming object. strict mode requires every property
+# to be listed in "required" and additionalProperties:false.
+schema:
+  name: classify_verdict
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      title:
+        type: string
+      important:
+        type: boolean
+      category:
+        type: string
+        enum: [security, breaking, feature, fix, noise]
+      release_level:
+        type: string
+        enum: [major, minor, patch, unknown]
+      confidence:
+        type: number
+      reason:
+        type: string
+    required: [title, important, category, release_level, confidence, reason]
 
 system: |
   You are an expert at analyzing software-project release updates.
@@ -22,6 +48,24 @@ system: |
     - it only has minor or cosmetic changes, with no security/bug fixes, no breaking
       changes, and nothing substantially new.
 
+  Determine the RELEASE LEVEL from the semantic version in the tag/title
+  (vMAJOR.MINOR.PATCH), and set "release_level" to one of:
+    - "major": MINOR and PATCH are both 0 (e.g. v3.0.0) — a major version bump;
+    - "minor": PATCH is 0 and MINOR is non-zero (e.g. v3.5.0) — a feature release;
+    - "patch": PATCH is non-zero (e.g. v3.5.4) — a maintenance release;
+    - "unknown": the version is missing or not semantic (e.g. a calendar version
+      like 2024.1, or a non-numeric tag).
+  For pre-1.0 versions (v0.MINOR.PATCH) a MINOR bump may itself be breaking.
+
+  Use the release level as a prior when judging importance, but let the actual
+  described changes decide:
+    - major and minor releases are usually IMPORTANT unless the description shows
+      the changes are trivial;
+    - a patch release is IMPORTANT only when it carries security fixes, critical
+      bug fixes, or breaking changes; a patch with only minor or cosmetic changes
+      is NOISE;
+    - never downgrade a security fix to noise because of the release level.
+
   Set "category" to one of: "security" (any security fix — always important),
   "breaking" (breaking changes), "feature" (substantial new functionality), "fix" (critical bug fixes) or
   "noise". Set "confidence" to a value in [0, 1].
@@ -30,6 +74,7 @@ system: |
   project and its version and then describes the change in 5-7 words — for
   example: "Prometheus v3.5.4 — fixes plaintext secret exposure and CVEs".
   Derive the project name and version from the source URL and title.
+  In "reason", state the detected version and its release level.
   Always respond strictly as JSON, with no extra text.
 user: |
   Assess the importance of the project update.
@@ -44,4 +89,4 @@ user: |
   {{ range .History }}- {{ .PublishedAt }}: {{ .VerdictReason }}
   {{ else }}No important-update history.
   {{ end }}
-  Respond strictly as JSON: {"title": string, "important": bool, "category": string, "confidence": float, "reason": string}
+  Respond strictly as JSON: {"title": string, "important": bool, "category": string, "release_level": string, "confidence": float, "reason": string}

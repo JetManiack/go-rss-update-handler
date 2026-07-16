@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,6 +128,108 @@ func TestComplete_InsecureTLS(t *testing.T) {
 	insecure := New(Config{BaseURL: server.URL, Model: "test", MaxRetries: 0, TLS: TLSConfig{Insecure: true}})
 	if _, err := insecure.Complete(context.Background(), Request{}); err != nil {
 		t.Fatalf("insecure client should connect to the self-signed server: %v", err)
+	}
+}
+
+// When a Request carries a Schema, the client must send an OpenAI-compatible
+// json_schema response_format (strict) wrapping that exact schema.
+func TestComplete_StructuredOutputSendsJSONSchema(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(r.Body)
+		body = buf.Bytes()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}],"model":"test"}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, APIKey: "x", Model: "test", MaxRetries: 0})
+	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"foo":{"type":"string"}},"required":["foo"]}`)
+	_, err := client.Complete(context.Background(), Request{
+		System: "sys", User: "usr",
+		Schema: schema, SchemaName: "my_schema",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	var got struct {
+		ResponseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name   string          `json:"name"`
+				Schema json.RawMessage `json:"schema"`
+				Strict bool            `json:"strict"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode request body: %v\nbody=%s", err, body)
+	}
+	if got.ResponseFormat.Type != "json_schema" {
+		t.Errorf("response_format.type = %q, want %q", got.ResponseFormat.Type, "json_schema")
+	}
+	if got.ResponseFormat.JSONSchema.Name != "my_schema" {
+		t.Errorf("json_schema.name = %q, want %q", got.ResponseFormat.JSONSchema.Name, "my_schema")
+	}
+	if !got.ResponseFormat.JSONSchema.Strict {
+		t.Error("json_schema.strict must be true")
+	}
+	var wantSchema, gotSchema map[string]any
+	_ = json.Unmarshal(schema, &wantSchema)
+	if err := json.Unmarshal(got.ResponseFormat.JSONSchema.Schema, &gotSchema); err != nil {
+		t.Fatalf("json_schema.schema is not valid JSON: %v", err)
+	}
+	if gotSchema["type"] != "object" || gotSchema["additionalProperties"] != false {
+		t.Errorf("schema not passed through verbatim: %v", gotSchema)
+	}
+}
+
+// Without a Schema, the client must not send any response_format (the legacy
+// json_object mode is gone).
+func TestComplete_NoSchemaOmitsResponseFormat(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(r.Body)
+		body = buf.Bytes()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],"model":"test"}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, APIKey: "x", Model: "test", MaxRetries: 0})
+	if _, err := client.Complete(context.Background(), Request{System: "s", User: "u"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	if _, ok := got["response_format"]; ok {
+		t.Errorf("response_format must be absent when no schema is set; body=%s", body)
+	}
+}
+
+// A 400 that complains about response_format (provider does not support
+// structured output) must surface a clear, actionable error.
+func TestComplete_UnsupportedStructuredOutputError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"response_format json_schema is not supported by this model"}}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, APIKey: "x", Model: "test", MaxRetries: 0})
+	schema := json.RawMessage(`{"type":"object"}`)
+	_, err := client.Complete(context.Background(), Request{Schema: schema, SchemaName: "s"})
+	if err == nil {
+		t.Fatal("expected an error when the provider rejects json_schema")
+	}
+	if !strings.Contains(err.Error(), "structured output") {
+		t.Errorf("error should mention structured output, got: %v", err)
 	}
 }
 

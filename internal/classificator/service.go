@@ -18,9 +18,13 @@ type Service interface {
 	Classify(ctx context.Context, update model.UpdateEvent, history []storage.Update) (storage.Verdict, error)
 }
 
-// PromptManager renders a named prompt blueprint into system and user messages.
+// PromptManager renders a named prompt blueprint into system and user messages,
+// and exposes the blueprint's optional structured-output schema.
 type PromptManager interface {
 	Execute(ctx context.Context, name string, data any) (system, user string, err error)
+	// Schema returns the blueprint's JSON schema and its name; ok is false when
+	// the blueprint declares no schema.
+	Schema(name string) (raw json.RawMessage, schemaName string, ok bool)
 }
 
 type service struct {
@@ -51,6 +55,9 @@ func (s *service) Classify(ctx context.Context, update model.UpdateEvent, histor
 	if err != nil {
 		return storage.Verdict{}, fmt.Errorf("render prompt: %w", err)
 	}
+	// Opt into structured output when the blueprint declares a schema; ok=false
+	// leaves schema nil, and the client falls back to plain generation.
+	schema, schemaName, _ := s.prompts.Schema("classify")
 
 	var lastParseErr error
 	for attempt := 0; attempt <= s.cfg.MaxFormatRetries; attempt++ {
@@ -63,7 +70,8 @@ func (s *service) Classify(ctx context.Context, update model.UpdateEvent, histor
 		resp, err := s.llm.Complete(ctx, llm.Request{
 			System:      system,
 			User:        userMsg,
-			JSONMode:    true,
+			Schema:      schema,
+			SchemaName:  schemaName,
 			Temperature: 0.1,
 		})
 		if err != nil {

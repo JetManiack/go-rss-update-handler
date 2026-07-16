@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,10 @@ type fakePrompts struct{}
 
 func (f *fakePrompts) Execute(_ context.Context, _ string, _ any) (string, string, error) {
 	return "system", "user", nil
+}
+
+func (f *fakePrompts) Schema(_ string) (json.RawMessage, string, bool) {
+	return nil, "", false
 }
 
 const feedXML = `<?xml version="1.0" encoding="UTF-8"?>

@@ -74,6 +74,11 @@ func runCollector(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			logger.Error("closing storage", "err", cerr)
+		}
+	}()
 	c := collector.NewCollector(cfg.Collector)
 	p := parser.NewParser()
 	d := deduplicator.NewDeduplicator()
@@ -119,6 +124,11 @@ func runWorker(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			logger.Error("closing storage", "err", cerr)
+		}
+	}()
 	llmClient := llm.New(cfg.LLM)
 	prompts, err := prompt.New(cfg.Prompt.Dir)
 	if err != nil {
@@ -135,6 +145,11 @@ func runDispatcher(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			logger.Error("closing storage", "err", cerr)
+		}
+	}()
 	disp := initDispatcher(cfg.Dispatcher)
 	orch := orchestrator.NewOrchestrator(nil, nil, nil, b, db.Feeds(), db.Updates(), nil, disp, logger)
 	return orch.RunDispatcher(ctx)
@@ -179,6 +194,14 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("init db: %w", err)
 	}
+	// Checkpoint the WAL into the primary db file and release the pool on the
+	// way out, so a graceful stop leaves a self-contained database. SIGKILL
+	// bypasses this and is treated as an unrecoverable force-majeure.
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			logger.Error("closing storage", "err", cerr)
+		}
+	}()
 
 	// Periodic raw_contents retention cleanup (no-op when retention is 0).
 	retention, err := storage.ParseRetention(cfg.Storage.RawContentRetention)

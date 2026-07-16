@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -18,17 +19,27 @@ import (
 //go:embed builtin
 var embedded embed.FS
 
+// schemaSpec is the optional structured-output contract of a blueprint: a JSON
+// Schema (authored in YAML) and a name for the response_format wrapper.
+type schemaSpec struct {
+	Name   string         `yaml:"name"`
+	Schema map[string]any `yaml:"schema"`
+}
+
 // blueprint is a single prompt: metadata plus system/user templates.
 type blueprint struct {
-	Name        string `yaml:"name"`
-	Version     string `yaml:"version"`
-	Critical    bool   `yaml:"critical"`
-	Description string `yaml:"description"`
-	System      string `yaml:"system"`
-	User        string `yaml:"user"`
+	Name        string     `yaml:"name"`
+	Version     string     `yaml:"version"`
+	Critical    bool       `yaml:"critical"`
+	Description string     `yaml:"description"`
+	System      string     `yaml:"system"`
+	User        string     `yaml:"user"`
+	Schema      schemaSpec `yaml:"schema"`
 
 	systemTmpl *template.Template
 	userTmpl   *template.Template
+	schemaJSON json.RawMessage // Schema.Schema compiled to JSON; nil when absent
+	schemaName string          // Schema.Name, or Name when empty
 }
 
 // Manager loads and renders prompt blueprints.
@@ -69,6 +80,18 @@ func (m *Manager) Execute(_ context.Context, name string, data any) (system, use
 		return "", "", fmt.Errorf("prompt: render user for %q: %w", name, err)
 	}
 	return system, user, nil
+}
+
+// Schema returns the structured-output JSON schema declared by the named
+// blueprint, along with its schema name. ok is false when the blueprint has no
+// schema (or does not exist), in which case callers should not request
+// structured output.
+func (m *Manager) Schema(name string) (raw json.RawMessage, schemaName string, ok bool) {
+	bp, found := m.blueprints[name]
+	if !found || bp.schemaJSON == nil {
+		return nil, "", false
+	}
+	return bp.schemaJSON, bp.schemaName, true
 }
 
 func (m *Manager) loadFS(fsys fs.FS, root string) error {
@@ -145,6 +168,22 @@ func (m *Manager) parse(path string, data []byte) error {
 		}
 		slog.Warn("prompt: invalid user template, skipping", "name", bp.Name, "err", err)
 		return nil
+	}
+
+	if len(bp.Schema.Schema) > 0 {
+		raw, jerr := json.Marshal(bp.Schema.Schema)
+		if jerr != nil {
+			if bp.Critical {
+				return fmt.Errorf("prompt: invalid schema in %q: %w", bp.Name, jerr)
+			}
+			slog.Warn("prompt: invalid schema, skipping", "name", bp.Name, "err", jerr)
+			return nil
+		}
+		bp.schemaJSON = raw
+		bp.schemaName = bp.Schema.Name
+		if bp.schemaName == "" {
+			bp.schemaName = bp.Name
+		}
 	}
 
 	m.blueprints[bp.Name] = bp

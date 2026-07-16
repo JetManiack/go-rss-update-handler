@@ -86,7 +86,7 @@ func Load(path string) (*Config, error) {
 	defaults := map[string]any{
 		"observability.log.level":            "info",
 		"observability.log.format":           "json",
-		"llm.timeout":                        "60s",
+		"llm.timeout":                        "5m",
 		"llm.max_retries":                    3,
 		"llm.max_concurrent":                 4,
 		"llm.temperature":                    0.1,

@@ -21,9 +21,14 @@ import (
 type Request struct {
 	System      string
 	User        string
-	JSONMode    bool // require application/json response
 	MaxTokens   int
 	Temperature float64
+
+	// Schema, when non-nil, requests structured output: the response is
+	// constrained to this JSON Schema via an OpenAI-compatible json_schema
+	// response_format (strict). SchemaName names that wrapper.
+	Schema     json.RawMessage
+	SchemaName string
 }
 
 // Response defines the output from the LLM.
@@ -72,9 +77,15 @@ type statusError struct {
 	code       int
 	retryable  bool
 	retryAfter time.Duration
+	structured bool // 400 rejecting the json_schema response_format
 }
 
-func (e *statusError) Error() string { return fmt.Sprintf("llm: status %d", e.code) }
+func (e *statusError) Error() string {
+	if e.structured {
+		return fmt.Sprintf("llm: status %d: request used structured output (json_schema) — the served model may not support it", e.code)
+	}
+	return fmt.Sprintf("llm: status %d", e.code)
+}
 
 // Complete sends a request to the LLM API, honoring the concurrency limit,
 // retrying network errors / 429 / 5xx (respecting Retry-After), and failing
@@ -118,8 +129,15 @@ func (c *client) doComplete(ctx context.Context, req Request) (Response, error) 
 	if req.MaxTokens > 0 {
 		payload["max_tokens"] = req.MaxTokens
 	}
-	if req.JSONMode {
-		payload["response_format"] = map[string]string{"type": "json_object"}
+	if len(req.Schema) > 0 {
+		payload["response_format"] = map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   req.SchemaName,
+				"schema": req.Schema, // json.RawMessage: embedded verbatim
+				"strict": true,
+			},
+		}
 	}
 
 	body, err := json.Marshal(payload)
@@ -181,6 +199,11 @@ func (c *client) doRequest(ctx context.Context, url string, body []byte) (*http.
 		se.retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 	case resp.StatusCode >= 500 && resp.StatusCode <= 599:
 		se.retryable = true
+	case resp.StatusCode == http.StatusBadRequest && bytes.Contains(body, []byte(`"json_schema"`)):
+		// We asked for structured output and the provider rejected the request;
+		// the served model most likely can't honor json_schema. Surface an
+		// actionable hint instead of a bare "status 400".
+		se.structured = true
 	}
 	_ = resp.Body.Close()
 	return nil, se

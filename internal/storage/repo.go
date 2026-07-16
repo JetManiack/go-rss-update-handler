@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,9 @@ type Store interface {
 	Feeds() FeedRepo
 	Updates() UpdateRepo
 	Channels() ChannelRepo
+	// Close flushes pending writes to the primary database file and releases
+	// the connection pool. It must be called on graceful shutdown.
+	Close() error
 }
 
 // FeedRepo defines operations on feeds.
@@ -75,6 +79,27 @@ func (s *gormStore) Updates() UpdateRepo {
 
 func (s *gormStore) Channels() ChannelRepo {
 	return &channelRepo{db: s.db}
+}
+
+// Close flushes pending writes to the primary database file and releases the
+// connection pool.
+//
+// For sqlite in WAL mode it first checkpoints the write-ahead log with TRUNCATE
+// so all committed data is folded back into the main .db file; otherwise the
+// data lives only in the -wal sidecar and is lost if the file is copied or
+// moved on its own. Closing the pool then lets sqlite remove the -wal/-shm
+// sidecars, leaving a self-contained, portable database file.
+func (s *gormStore) Close() error {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	if s.db.Dialector.Name() == "sqlite" {
+		if err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);").Error; err != nil {
+			return fmt.Errorf("storage: wal checkpoint on close: %w", err)
+		}
+	}
+	return sqlDB.Close()
 }
 
 type feedRepo struct {
