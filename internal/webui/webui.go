@@ -102,6 +102,33 @@ func Handler(fetch FetchFunc) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/feed.atom", func(w http.ResponseWriter, r *http.Request) {
+		// Mirror the Web UI's category/importance filters; a feed is a fixed
+		// window (latest feedMaxItems), so limit/offset are not exposed.
+		q := Query{
+			Category:   r.URL.Query().Get("category"),
+			Importance: r.URL.Query().Get("importance"),
+			Limit:      feedMaxItems,
+			Offset:     0,
+		}
+		updates, _, err := fetch(r.Context(), q)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		self := r.URL.RequestURI()
+		if r.Host != "" {
+			self = "http://" + r.Host + r.URL.RequestURI()
+		}
+		body, err := renderAtom(self, updates)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+		_, _ = w.Write(body)
+	})
+
 	mux.HandleFunc("/go-ruh.png", func(w http.ResponseWriter, _ *http.Request) {
 		b, err := static.ReadFile("go-ruh.png")
 		if err != nil {
