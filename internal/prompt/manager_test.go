@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/JetManiack/go-rss-update-handler/internal/storage"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -37,13 +40,65 @@ func TestManager_ExecuteBuiltinClassify(t *testing.T) {
 	}
 	// User prompt must render the data and carry the exact schema, with no
 	// leftover template syntax.
-	for _, want := range []string{"some content", "## Current update", `"important"`, "No important-update history."} {
+	for _, want := range []string{"some content", "## Current update", `"important"`, "No important-update history for this feed."} {
 		if !strings.Contains(user, want) {
 			t.Errorf("user prompt missing %q:\n%s", want, user)
 		}
 	}
 	if strings.Contains(system, "{{") || strings.Contains(user, "{{") {
 		t.Errorf("unrendered template syntax remains:\nsystem=%s\nuser=%s", system, user)
+	}
+}
+
+// The classify history must render each prior important update's version
+// (Title) and category so the model can judge the current update relative to
+// them. Uses the real storage.Update type to catch template field-name drift.
+func TestManager_ClassifyHistoryRendersTitleAndCategory(t *testing.T) {
+	m, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	data := map[string]any{
+		"Current": map[string]any{"Title": "proj v9.0.1", "SourceURL": "u", "RawContent": "c"},
+		"History": []storage.Update{{
+			PublishedAt:     time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC),
+			Title:           "proj v9.0.0",
+			VerdictCategory: "feature",
+			VerdictReason:   "major release with new API",
+		}},
+	}
+	_, user, err := m.Execute(context.Background(), "classify", data)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for _, want := range []string{"proj v9.0.0", "feature", "major release with new API", "2026-07-16"} {
+		if !strings.Contains(user, want) {
+			t.Errorf("history line missing %q:\n%s", want, user)
+		}
+	}
+	if strings.Contains(user, "{{") {
+		t.Errorf("unrendered template syntax remains:\n%s", user)
+	}
+}
+
+// The classify system prompt must instruct the model to judge the current
+// update relative to the recent important updates.
+func TestManager_ClassifySystemMentionsRelativeComparison(t *testing.T) {
+	m, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	system, _, err := m.Execute(context.Background(), "classify", map[string]any{
+		"Current": map[string]any{"RawContent": "x"},
+		"History": []storage.Update{},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(system), "relative") {
+		t.Errorf("system prompt should tell the model to judge relative to history:\n%s", system)
 	}
 }
 

@@ -1,5 +1,5 @@
 name: classify
-version: "2.4.0"
+version: "2.5.0"
 critical: true
 description: "Classify a project update against the feed's recent important updates"
 
@@ -66,6 +66,19 @@ system: |
       is NOISE;
     - never downgrade a security fix to noise because of the release level.
 
+  When recent important updates for this feed are listed, judge the current
+  update RELATIVE to them — the goal is to surface only genuinely useful
+  updates and suppress incremental follow-ups the user was effectively already
+  told about:
+    - if the current release merely increments a version already flagged
+      important (e.g. a prior important update was v9.0.0 and this is v9.0.1)
+      and adds only routine maintenance, treat it as NOISE;
+    - treat such a follow-up as IMPORTANT only when it carries a security fix, a
+      fix for a critical or regression bug (often one introduced by that prior
+      release), or a breaking change;
+    - if no listed update is a relevant predecessor, judge the current update on
+      its own merits using the rules above.
+
   Set "category" to one of: "security" (any security fix — always important),
   "breaking" (breaking changes), "feature" (substantial new functionality), "fix" (critical bug fixes) or
   "noise". Set "confidence" to a value in [0, 1].
@@ -85,8 +98,8 @@ user: |
 
   {{ .Current.RawContent }}
 
-  ## Most recent important updates (for comparison)
-  {{ range .History }}- {{ .PublishedAt }}: {{ .VerdictReason }}
-  {{ else }}No important-update history.
+  ## Most recent important updates for THIS feed (newest first, for comparison)
+  {{ range .History }}- {{ .PublishedAt.Format "2006-01-02" }} | {{ .Title }} | category={{ .VerdictCategory }} | {{ .VerdictReason }}
+  {{ else }}No important-update history for this feed.
   {{ end }}
   Respond strictly as JSON: {"title": string, "important": bool, "category": string, "release_level": string, "confidence": float, "reason": string}
